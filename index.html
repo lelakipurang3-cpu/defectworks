@@ -1652,8 +1652,279 @@ input,textarea,select{font-family:'DM Sans',sans-serif}
 
   <!-- OTHER PANELS — built in Sessions 5–10 -->
   <div class="main-panel page" id="defectWorkPanel">
-         <div class="card"><div class="card-body" ...>New Letter — built Session 5</div></div>
-       </div>
+
+  <!-- Sub-section tabs -->
+  <div class="sub-tabs" id="defectSubTabs">
+    <button class="sub-tab active" data-sub="details">1 · Details</button>
+    <button class="sub-tab" data-sub="preview" id="previewTab">2 · Preview</button>
+    <button class="sub-tab" data-sub="review" id="reviewTab">3 · Review &amp; Submit</button>
+  </div>
+
+  <!-- ── STEP 1: DETAILS ────────────────────── -->
+  <div class="sub-content active" id="detailsSub">
+
+    <!-- Offline warning -->
+    <div class="offline-form-banner" id="offlineFormBanner">
+      📡 You are offline. You can still fill the form and submit — it will save with a temporary
+      reference number. The real reference number will be assigned automatically when you reconnect.
+    </div>
+
+    <div class="card">
+      <div class="card-hdr">
+        <div>
+          <div class="card-title">Defect Works Instruction</div>
+          <div class="card-sub">Fill common details once · add subcontractors · preview each letter · submit all</div>
+        </div>
+        <div class="ref-pill">
+          <span class="ref-pill-dot"></span>
+          <span id="refPillText">HYK/EOD/…/…</span>
+        </div>
+      </div>
+      <div class="card-body">
+
+        <!-- PROJECT SECTION -->
+        <div class="sdiv"><span>Project</span><hr></div>
+        <div class="fr2">
+          <div class="field">
+            <label>Letter Date <span class="req">*</span></label>
+            <input type="date" id="sf_letterDate" onchange="FORM.onDateChange()">
+          </div>
+          <div class="field">
+            <label>Date From Buyer
+              <span style="color:var(--ink-5);font-size:9px;letter-spacing:.06em">
+                (TRACKING ONLY — not on letter)
+              </span>
+            </label>
+            <input type="date" id="sf_dateFromBuyer">
+          </div>
+        </div>
+        <div class="field">
+          <label>Select Project <span class="req">*</span></label>
+          <select id="sf_projectSelect" onchange="FORM.onProjectSelect()">
+            <option value="">— Choose Project —</option>
+          </select>
+        </div>
+        <div class="fr2">
+          <div class="field">
+            <label>Project Title</label>
+            <input id="sf_projectTitle" readonly>
+          </div>
+          <div class="field">
+            <label>Location / Lot</label>
+            <input id="sf_locationLot" readonly>
+          </div>
+        </div>
+        <div class="fr2">
+          <div class="field">
+            <label>Client (Tetuan)</label>
+            <input id="sf_clientName" readonly>
+          </div>
+          <div class="field">
+            <label>Project Items</label>
+            <div id="sf_projItems" style="font-size:13px;color:var(--ink-3);padding:8px 11px;
+              background:var(--surface-2);border:1px solid var(--border);
+              border-radius:var(--radius);min-height:38px;line-height:1.6">–</div>
+          </div>
+        </div>
+
+        <!-- HOUSE NO -->
+        <div class="sdiv"><span>House / Unit</span><hr></div>
+        <div class="fr2">
+          <div class="field">
+            <label>House No / Unit <span class="req">*</span></label>
+            <div class="typeahead-wrap">
+              <input id="sf_houseNo" placeholder="e.g. 143"
+                autocomplete="off"
+                oninput="FORM.onHouseInput()"
+                onblur="FORM.onHouseBlur()">
+              <div class="typeahead-list" id="sf_houseList"></div>
+            </div>
+          </div>
+          <div class="field">
+            <label>D Cycle <span style="color:var(--ink-5);font-size:9px">(AUTO-DETECTED)</span></label>
+            <input id="sf_dCycle" readonly placeholder="Assigned on submit">
+          </div>
+        </div>
+
+        <!-- LETTER BODY -->
+        <div class="sdiv"><span>Letter Body</span><hr></div>
+        <div class="field">
+          <label>Opening Paragraph</label>
+          <div class="editor-wrap">
+            <div class="editor-toolbar">
+              <button class="tb-btn" onclick="FORM.tbFormat('sf_body','b')" title="Bold"><b>B</b></button>
+              <button class="tb-btn" onclick="FORM.tbFormat('sf_body','i')" title="Italic"><i>I</i></button>
+              <button class="tb-btn" onclick="FORM.tbFormat('sf_body','u')" title="Underline"><u>U</u></button>
+              <div class="tb-sep"></div>
+              <button class="tb-btn" onclick="FORM.tbPara('sf_body')" title="Paragraph">¶</button>
+              <div class="tb-sep"></div>
+              <select onchange="FORM.setLineHeight('body',this.value)">
+                <option value="">Line Height</option>
+                <option value="tight">Tight (1.2)</option>
+                <option value="normal" selected>Normal (1.5)</option>
+                <option value="relaxed">Relaxed (1.8)</option>
+                <option value="double">Double (2.0)</option>
+              </select>
+            </div>
+            <textarea id="sf_body" rows="3" oninput="FORM.onBodyChange()"></textarea>
+          </div>
+        </div>
+        <div class="field">
+          <label>Terms &amp; Conditions
+            <span style="color:var(--ink-5);font-size:9px">(use &lt;b&gt;…&lt;/b&gt; for bold)</span>
+          </label>
+          <div class="editor-wrap">
+            <div class="editor-toolbar">
+              <button class="tb-btn" onclick="FORM.tbFormat('sf_terms','b')"><b>B</b></button>
+              <button class="tb-btn" onclick="FORM.tbFormat('sf_terms','i')"><i>I</i></button>
+              <button class="tb-btn" onclick="FORM.tbFormat('sf_terms','u')"><u>U</u></button>
+              <div class="tb-sep"></div>
+              <button class="tb-btn" onclick="FORM.tbPara('sf_terms')">¶</button>
+              <div class="tb-sep"></div>
+              <select onchange="FORM.setLineHeight('terms',this.value)">
+                <option value="">Line Height</option>
+                <option value="tight">Tight</option>
+                <option value="normal" selected>Normal</option>
+                <option value="relaxed">Relaxed</option>
+                <option value="double">Double</option>
+              </select>
+            </div>
+            <textarea id="sf_terms" rows="6" oninput="FORM.onBodyChange()"></textarea>
+          </div>
+        </div>
+        <div class="field">
+          <label>Closing Line</label>
+          <input id="sf_closing" oninput="FORM.onBodyChange()">
+        </div>
+
+        <!-- SIGNATURES -->
+        <div class="sdiv"><span>Signatures</span><hr></div>
+        <div class="sig-cards">
+          <div class="sig-card">
+            <div class="sig-card-label">Issued By</div>
+            <div class="field" style="margin:0">
+              <select id="sf_issuerSelect" onchange="FORM.onPicSelect('issuer')">
+                <option value="">— Select —</option>
+              </select>
+            </div>
+            <div class="sig-preview" id="sf_issuerPreview">
+              <div style="color:var(--ink-5);font-size:12px">No PIC selected</div>
+            </div>
+          </div>
+          <div class="sig-card">
+            <div class="sig-card-label">Verified By</div>
+            <div class="field" style="margin:0">
+              <select id="sf_verifierSelect" onchange="FORM.onPicSelect('verifier')">
+                <option value="">— Select —</option>
+              </select>
+            </div>
+            <div class="sig-preview" id="sf_verifierPreview">
+              <div style="color:var(--ink-5);font-size:12px">No PIC selected</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SUBCONTRACTORS SECTION -->
+        <div class="sdiv"><span>Subcontractors &amp; Defect Items</span><hr></div>
+        <div style="font-size:13px;color:var(--ink-3);margin-bottom:14px;line-height:1.6">
+          Add one section per subcontractor. Each gets their own letter and reference number.
+          Common details above (project, house, date, body, signatures) apply to all.
+        </div>
+
+        <!-- Sub blocks rendered here -->
+        <div id="sf_subBlocks"></div>
+
+        <button class="btn btn-ghost" style="width:100%;margin-top:4px"
+          onclick="FORM.addSubBlock()">
+          + Add Subcontractor
+        </button>
+
+      </div><!-- /card-body -->
+      <div class="card-footer">
+        <button class="btn btn-secondary" onclick="FORM.resetForm()">↺ Clear Form</button>
+        <button class="btn btn-primary" onclick="FORM.goToPreview()">
+          Preview Letters →
+        </button>
+      </div>
+    </div><!-- /card -->
+  </div><!-- /detailsSub -->
+
+  <!-- ── STEP 2: PREVIEW ────────────────────── -->
+  <div class="sub-content" id="previewSub">
+    <div class="preview-nav">
+      <div>
+        <div class="preview-sub-indicator" id="previewSubIndicator">Letter 1 of 1</div>
+        <div class="preview-sub-name" id="previewSubName">—</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-secondary btn-sm" id="previewPrevBtn"
+          onclick="FORM.previewNav(-1)">← Prev</button>
+        <button class="btn btn-secondary btn-sm" id="previewNextBtn"
+          onclick="FORM.previewNav(1)">Next →</button>
+      </div>
+    </div>
+    <div class="preview-toolbar">
+      <div style="font-size:13px;color:var(--ink-4)">A4 Preview — matches printed output</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <div class="zoom-group">
+          <button class="zoom-btn" onclick="FORM.zoomOut()">−</button>
+          <span class="zoom-label" id="zoomLabel">85%</span>
+          <button class="zoom-btn" onclick="FORM.zoomIn()">+</button>
+          <button class="zoom-btn" onclick="FORM.zoomReset()"
+            style="font-size:11px;padding:5px 8px">Reset</button>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="FORM.goToDetails()">
+          ← Back
+        </button>
+        <button class="btn btn-primary btn-sm" onclick="FORM.goToReview()">
+          Review & Submit →
+        </button>
+      </div>
+    </div>
+    <div class="sheet-wrapper">
+      <div id="sf_a4sheet" class="a4-sheet"></div>
+    </div>
+  </div><!-- /previewSub -->
+
+  <!-- ── STEP 3: REVIEW & SUBMIT ─────────────── -->
+  <div class="sub-content" id="reviewSub">
+    <div class="card">
+      <div class="card-hdr">
+        <div>
+          <div class="card-title">Review &amp; Submit</div>
+          <div class="card-sub" id="reviewSubCount">0 letters to generate</div>
+        </div>
+      </div>
+      <div class="card-body">
+
+        <!-- Common details summary -->
+        <div class="rev-grid" id="sf_reviewCommon" style="margin-bottom:20px"></div>
+
+        <!-- Per-sub letter summaries -->
+        <div style="margin-top:4px">
+          <div class="sdiv"><span>Letters to Generate</span><hr></div>
+          <div id="sf_reviewLetters"></div>
+        </div>
+
+        <!-- Offline notice on review -->
+        <div class="offline-form-banner" id="offlineReviewBanner"
+          style="margin-top:12px">
+          📡 Offline — letters will be saved with temporary reference numbers.
+          Real reference numbers will be assigned when you reconnect.
+        </div>
+
+      </div>
+      <div class="card-footer">
+        <button class="btn btn-secondary" onclick="FORM.goToPreview()">← Back to Preview</button>
+        <button class="btn btn-primary" id="sf_submitBtn"
+          onclick="FORM.onSubmitClick()">
+          ✓ Confirm &amp; Generate Letters →
+        </button>
+      </div>
+    </div>
+  </div><!-- /reviewSub -->
+
+</div>
   <div class="main-panel page" id="historyPanel">
 
   <!-- Search & filter card -->
