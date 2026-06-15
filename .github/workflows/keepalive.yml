@@ -1,0 +1,112 @@
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  HYK DefectWorks — Supabase Keepalive                                   ║
+# ║  File location: .github/workflows/keepalive.yml                         ║
+# ║  Purpose: Ping Supabase every 3 days to prevent free tier pause         ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+#
+# HOW IT WORKS:
+#   GitHub Actions runs this on a schedule (Mon + Thu at 8am UTC).
+#   It sends a lightweight INSERT to your Supabase keepalive table.
+#   Supabase sees activity → resets the 7-day inactivity timer.
+#   Total bandwidth used: ~200 bytes per run. Zero cost.
+#
+# SETUP (one time only — detailed in setup guide):
+#   1. In your GitHub repo → Settings → Secrets → Actions → New secret
+#   2. Add: SUPABASE_URL       = https://xxxxxxxxxxxx.supabase.co
+#   3. Add: SUPABASE_ANON_KEY  = your anon/public key from Supabase dashboard
+#   That's it. Never touch this file again.
+
+name: Supabase Keepalive
+
+on:
+  schedule:
+    # Runs Monday 08:00 UTC  (cron: minute hour day month weekday)
+    - cron: '0 8 * * 1'
+    # Runs Thursday 08:00 UTC
+    - cron: '0 8 * * 4'
+
+  # Allow manual trigger from GitHub Actions tab (useful for testing)
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for manual trigger'
+        required: false
+        default: 'Manual keepalive test'
+
+jobs:
+  ping-supabase:
+    name: Ping Supabase Keepalive
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      # ── Step 1: Ping Supabase keepalive table ──────────────────────────
+      - name: Ping Supabase
+        id: ping
+        run: |
+          echo "Pinging Supabase at $(date -u)"
+
+          RESPONSE=$(curl \
+            --silent \
+            --show-error \
+            --fail \
+            --max-time 30 \
+            --retry 3 \
+            --retry-delay 5 \
+            --retry-all-errors \
+            --request POST \
+            --url "${{ secrets.SUPABASE_URL }}/rest/v1/keepalive" \
+            --header "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+            --header "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}" \
+            --header "Content-Type: application/json" \
+            --header "Prefer: return=minimal" \
+            --data '{"pinged_by":"github_actions"}' \
+            --write-out "\nHTTP_STATUS:%{http_code}" \
+            2>&1)
+
+          HTTP_STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS:" | cut -d: -f2)
+          BODY=$(echo "$RESPONSE" | grep -v "HTTP_STATUS:")
+
+          echo "HTTP Status: $HTTP_STATUS"
+          echo "Response: $BODY"
+
+          # HTTP 201 = Created (success), 200 = OK also acceptable
+          if [ "$HTTP_STATUS" = "201" ] || [ "$HTTP_STATUS" = "200" ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "✅ Supabase keepalive ping successful (HTTP $HTTP_STATUS)"
+          else
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "❌ Keepalive ping failed (HTTP $HTTP_STATUS)"
+            echo "Response body: $BODY"
+            exit 1
+          fi
+
+      # ── Step 2: Verify Supabase is responding ──────────────────────────
+      - name: Verify Supabase Health
+        if: steps.ping.outputs.status == 'success'
+        run: |
+          echo "Verifying Supabase health..."
+
+          RESPONSE=$(curl \
+            --silent \
+            --max-time 15 \
+            --request GET \
+            --url "${{ secrets.SUPABASE_URL }}/rest/v1/keepalive?select=created_at&order=created_at.desc&limit=1" \
+            --header "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+            --header "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}" \
+            2>&1)
+
+          echo "Last keepalive record: $RESPONSE"
+          echo "✅ Supabase health check passed"
+
+      # ── Step 3: Summary ────────────────────────────────────────────────
+      - name: Summary
+        if: always()
+        run: |
+          echo "═══════════════════════════════════════"
+          echo "  HYK DefectWorks Keepalive Summary"
+          echo "═══════════════════════════════════════"
+          echo "  Time     : $(date -u)"
+          echo "  Status   : ${{ steps.ping.outputs.status }}"
+          echo "  Next run : $(date -u -d 'next monday' '+%Y-%m-%d 08:00 UTC' 2>/dev/null || echo 'Mon or Thu 08:00 UTC')"
+          echo "═══════════════════════════════════════"
