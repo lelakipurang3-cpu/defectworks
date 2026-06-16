@@ -5296,7 +5296,7 @@ const FORM = {
           location:      s.location,
           client:        s.client,
           house_no:      s.houseNo,
-          d_cycle:       null,     // filled by SQL function
+          d_cycle:       'PENDING', // filled by SQL function
           sub_id:        sub.subId,
           subcontractor: sub.subName,
           sub_short_code: sub.subShortCode,
@@ -5902,11 +5902,16 @@ const HIST = {
     try {
       showLoading('Preparing print…');
       const record = await DATA.getHistoryRecord(id);
-      document.getElementById('printContainer').innerHTML =
-        `<div class="a4-sheet print-sheet">${HIST._buildLetterHTML(record)}</div>`;
+      // Build letter HTML into print container
+      const pc = document.getElementById('printContainer');
+      pc.innerHTML = `<div class="a4-sheet print-sheet">${HIST._buildLetterHTML(record)}</div>`;
       hideLoading();
-      LOG.activity('print', `Printed letter ${record.ref_no || record.temp_ref}`, record.ref_no || '');
+      LOG.activity('print', 'Printed letter ' + (record.ref_no || record.temp_ref), record.ref_no || '');
+      // Small delay to let styles apply before print dialog
+      await new Promise(r => setTimeout(r, 200));
       window.print();
+      // Clear after print
+      setTimeout(() => { pc.innerHTML = ''; }, 2000);
     } catch(e) {
       hideLoading();
       toast('Print failed: ' + e.message, 'err');
@@ -5920,18 +5925,42 @@ const HIST = {
       const record = await DATA.getHistoryRecord(id);
 
       // Render letter into hidden container
+      // Render into a visible off-screen div for html2canvas
       const container = document.getElementById('printContainer');
-      container.innerHTML = `
-        <div class="a4-sheet" style="margin:0;box-shadow:none;width:210mm;
-          padding:12mm 14mm 10mm 14mm;font-family:'Times New Roman',serif;
-          font-size:10pt;line-height:1.35;color:#111827;background:#fff">
-          ${HIST._buildLetterHTML(record)}
-        </div>`;
+      container.innerHTML = '';
+      
+      // Create a properly sized render target
+      const renderDiv = document.createElement('div');
+      renderDiv.style.cssText = [
+        'position:fixed',
+        'left:-9999px',
+        'top:0',
+        'width:794px',       // A4 at 96dpi
+        'min-height:1123px', // A4 at 96dpi
+        'background:#fff',
+        'padding:45px 53px', // ~12mm/14mm margins at 96dpi
+        'font-family:Times New Roman,serif',
+        'font-size:13.3px',  // 10pt at 96dpi
+        'line-height:1.35',
+        'color:#111827',
+        'box-sizing:border-box',
+        'z-index:-1',
+      ].join(';');
+      renderDiv.innerHTML = HIST._buildLetterHTML(record);
+      document.body.appendChild(renderDiv);
 
-      const sheet = container.querySelector('.a4-sheet');
-      const canvas = await html2canvas(sheet, {
-        scale: 2, useCORS: true, backgroundColor: '#ffffff'
+      // Wait for fonts/images to load
+      await new Promise(r => setTimeout(r, 300));
+
+      const canvas = await html2canvas(renderDiv, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        width: 794,
+        height: renderDiv.scrollHeight,
+        windowWidth: 794,
       });
+      document.body.removeChild(renderDiv);
       container.innerHTML = '';
       hideLoading();
 
