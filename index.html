@@ -628,14 +628,58 @@ input,textarea,select{font-family:'DM Sans',sans-serif}
 ═══════════════════════════════════════════════════════════════ */
 .print-only{display:none}
 @media print{
-  @page{size:A4;margin:0}
-  body{background:#fff}
-  .print-only{display:block!important}
-  #topNav,#mainApp,#adminPage,#loginScreen,#loadingOverlay,
-  #networkWall,.notif-panel,.modal-overlay,.status-popover,#toast{display:none!important}
-  .a4-sheet.print-sheet{display:block!important;visibility:visible!important;
-    position:static!important;width:auto;min-height:auto;margin:0;padding:0;
-    box-shadow:none;transform:none!important;--spr:14mm}
+  @page{
+    size:A4 portrait;
+    margin:12mm 14mm 10mm 14mm;
+  }
+  *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+  html,body{
+    width:210mm;height:297mm;
+    background:#fff!important;
+    font-family:'Times New Roman',serif!important;
+    font-size:10pt!important;
+    line-height:1.35!important;
+    color:#000!important;
+    margin:0!important;padding:0!important;
+  }
+  /* Hide everything except the print container */
+  body > *:not(#printContainer){display:none!important}
+  #printContainer{
+    display:block!important;
+    position:static!important;
+    width:100%!important;
+    margin:0!important;padding:0!important;
+  }
+  .print-sheet{
+    display:block!important;
+    width:100%!important;
+    margin:0!important;padding:0!important;
+    box-shadow:none!important;
+    transform:none!important;
+    font-family:'Times New Roman',serif!important;
+    font-size:10pt!important;
+    line-height:1.35!important;
+    color:#000!important;
+    page-break-inside:avoid;
+    page-break-after:avoid;
+  }
+  /* Force all letter elements to print correctly */
+  .print-sheet p{margin:0 0 3pt!important;font-size:10pt!important}
+  .print-sheet table{
+    width:100%!important;border-collapse:collapse!important;
+    font-size:10pt!important;page-break-inside:avoid!important;
+  }
+  .print-sheet table td,.print-sheet table th{
+    border:1px solid #000!important;
+    padding:2pt 4pt!important;
+    font-size:10pt!important;
+  }
+  .print-sheet ol,.print-sheet ul{margin-left:16pt!important}
+  .print-sheet li{font-size:10pt!important;margin-bottom:1pt!important}
+  /* Signature block stays on same page */
+  .sig-flex{page-break-inside:avoid!important}
+  /* Defect table stays on same page */
+  .defect-heading{page-break-before:avoid!important}
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1483,7 +1527,8 @@ input,textarea,select{font-family:'DM Sans',sans-serif}
 
   <div class="nav-right">
     <!-- network status -->
-    <div class="sync-wrap" title="Network status">
+    <div class="sync-wrap" title="Click for Supabase status"
+      onclick="UI.showStatusPopup()" style="cursor:pointer">
       <div class="sync-dot connecting" id="syncDot"></div>
       <div>
         <div class="sync-label" id="syncLabel">Connecting</div>
@@ -1609,6 +1654,44 @@ input,textarea,select{font-family:'DM Sans',sans-serif}
     </div>
   </div>
 
+  <!-- Supabase status card -->
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-hdr">
+      <div>
+        <div class="card-title">⚡ Server Status</div>
+        <div class="card-sub">Supabase connection health</div>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="DASH.refreshStatus()">
+        ↺ Refresh
+      </button>
+    </div>
+    <div class="card-body">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px"
+        id="dash_statusGrid">
+        <div class="stat-card">
+          <div class="stat-num" id="dash_connStatus" style="font-size:24px">—</div>
+          <div class="stat-lbl">Connection</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num" id="dash_latency" style="font-size:24px">—</div>
+          <div class="stat-lbl">Latency</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num" id="dash_lastKeepalive" style="font-size:20px">—</div>
+          <div class="stat-lbl">Last Keepalive Ping</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num" id="dash_pauseRisk" style="font-size:24px">—</div>
+          <div class="stat-lbl">Pause Risk</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num" id="dash_dbSize" style="font-size:24px">—</div>
+          <div class="stat-lbl">Records in DB</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Two-column lower section -->
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
 
@@ -1669,6 +1752,13 @@ input,textarea,select{font-family:'DM Sans',sans-serif}
       reference number. The real reference number will be assigned automatically when you reconnect.
     </div>
 
+    <!-- Incomplete warning (shown on preview/review if info missing) -->
+    <div class="offline-form-banner" id="incompleteWarnBanner"
+      style="background:#7c3aed;border-color:#a78bfa;color:#ede9fe;display:none">
+      ⚠ <span id="incompleteWarnMsg">Some required fields are missing.</span>
+      You can still preview — but you cannot submit until all required fields are filled.
+    </div>
+
     <div class="card">
       <div class="card-hdr">
         <div>
@@ -1681,6 +1771,27 @@ input,textarea,select{font-family:'DM Sans',sans-serif}
         </div>
       </div>
       <div class="card-body">
+
+        <!-- TEST MODE -->
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;
+          padding:10px 14px;background:var(--surface-2);border:1px dashed var(--border-2);
+          border-radius:var(--radius)">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;
+            font-size:13px;color:var(--ink-3)">
+            <input type="checkbox" id="sf_isTest"
+              onchange="FORM._state.isTest=this.checked;FORM._updateTestBanner()">
+            <span>🧪 <strong>Test / Draft mode</strong></span>
+          </label>
+          <span style="font-size:11px;color:var(--ink-4)">
+            No ref number generated · Not counted in KPI · Visible in history with TEST badge
+          </span>
+        </div>
+        <div id="testModeBanner" style="display:none;background:#064e3b;
+          border:1px solid #065f46;border-radius:var(--radius);padding:8px 14px;
+          font-size:12px;color:#6ee7b7;margin-bottom:10px">
+          🧪 TEST MODE — This letter will be saved but ref number counter will NOT increment.
+          It will appear in History with a TEST badge and is excluded from all KPI and analytics.
+        </div>
 
         <!-- PROJECT SECTION -->
         <div class="sdiv"><span>Project</span><hr></div>
@@ -1746,55 +1857,81 @@ input,textarea,select{font-family:'DM Sans',sans-serif}
           </div>
         </div>
 
-        <!-- LETTER BODY -->
-        <div class="sdiv"><span>Letter Body</span><hr></div>
-        <div class="field">
-          <label>Opening Paragraph</label>
-          <div class="editor-wrap">
-            <div class="editor-toolbar">
-              <button class="tb-btn" onclick="FORM.tbFormat('sf_body','b')" title="Bold"><b>B</b></button>
-              <button class="tb-btn" onclick="FORM.tbFormat('sf_body','i')" title="Italic"><i>I</i></button>
-              <button class="tb-btn" onclick="FORM.tbFormat('sf_body','u')" title="Underline"><u>U</u></button>
-              <div class="tb-sep"></div>
-              <button class="tb-btn" onclick="FORM.tbPara('sf_body')" title="Paragraph">¶</button>
-              <div class="tb-sep"></div>
-              <select onchange="FORM.setLineHeight('body',this.value)">
-                <option value="">Line Height</option>
-                <option value="tight">Tight (1.2)</option>
-                <option value="normal" selected>Normal (1.5)</option>
-                <option value="relaxed">Relaxed (1.8)</option>
-                <option value="double">Double (2.0)</option>
-              </select>
-            </div>
-            <textarea id="sf_body" rows="3" oninput="FORM.onBodyChange()"></textarea>
-          </div>
+        <!-- LETTER BODY — collapsible, admin editable only -->
+        <div class="sdiv">
+          <span>Letter Body</span>
+          <hr>
+          <button class="btn btn-ghost btn-xs" id="bodyToggleBtn"
+            onclick="FORM.toggleBodySection()"
+            style="white-space:nowrap;flex-shrink:0">
+            ▼ Show
+          </button>
         </div>
-        <div class="field">
-          <label>Terms &amp; Conditions
-            <span style="color:var(--ink-5);font-size:9px">(use &lt;b&gt;…&lt;/b&gt; for bold)</span>
-          </label>
-          <div class="editor-wrap">
-            <div class="editor-toolbar">
-              <button class="tb-btn" onclick="FORM.tbFormat('sf_terms','b')"><b>B</b></button>
-              <button class="tb-btn" onclick="FORM.tbFormat('sf_terms','i')"><i>I</i></button>
-              <button class="tb-btn" onclick="FORM.tbFormat('sf_terms','u')"><u>U</u></button>
-              <div class="tb-sep"></div>
-              <button class="tb-btn" onclick="FORM.tbPara('sf_terms')">¶</button>
-              <div class="tb-sep"></div>
-              <select onchange="FORM.setLineHeight('terms',this.value)">
-                <option value="">Line Height</option>
-                <option value="tight">Tight</option>
-                <option value="normal" selected>Normal</option>
-                <option value="relaxed">Relaxed</option>
-                <option value="double">Double</option>
-              </select>
+
+        <div id="letterBodySection" style="display:none">
+          <!-- Admin toolbar — hidden for regular users -->
+          <div id="bodyAdminToolbar" style="display:none">
+            <div style="background:var(--amber-light);border:1px solid rgba(217,119,6,.3);
+              border-radius:var(--radius);padding:8px 14px;margin-bottom:10px;
+              display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <span style="font-size:12px;color:var(--amber-dark);font-weight:600">
+                ✏ Admin Edit Mode
+              </span>
+              <span style="font-size:11px;color:var(--amber-dark)">
+                Changes apply to this letter only. Use Save as Default to update all future letters.
+              </span>
+              <button class="btn btn-primary btn-xs" style="margin-left:auto"
+                onclick="FORM.saveBodyAsDefault()">
+                💾 Save as Default
+              </button>
             </div>
-            <textarea id="sf_terms" rows="6" oninput="FORM.onBodyChange()"></textarea>
           </div>
-        </div>
-        <div class="field">
-          <label>Closing Line</label>
-          <input id="sf_closing" oninput="FORM.onBodyChange()">
+
+          <!-- Body text -->
+          <div class="field">
+            <label>Opening Paragraph</label>
+            <div class="editor-wrap" id="bodyEditorWrap">
+              <div class="editor-toolbar" id="bodyToolbar">
+                <button class="tb-btn" onclick="FORM.tbFormat('sf_body','b')"><b>B</b></button>
+                <button class="tb-btn" onclick="FORM.tbFormat('sf_body','i')"><i>I</i></button>
+                <button class="tb-btn" onclick="FORM.tbFormat('sf_body','u')"><u>U</u></button>
+                <div class="tb-sep"></div>
+                <button class="tb-btn" onclick="FORM.tbPara('sf_body')">¶</button>
+                <div class="tb-sep"></div>
+                <select onchange="FORM.setLineHeight('body',this.value)">
+                  <option value="">Line Height</option>
+                  <option value="tight">Tight</option>
+                  <option value="normal" selected>Normal</option>
+                  <option value="relaxed">Relaxed</option>
+                  <option value="double">Double</option>
+                </select>
+              </div>
+              <textarea id="sf_body" rows="3" oninput="FORM.onBodyChange()"
+                style="border-radius:0 0 var(--radius) var(--radius)!important"></textarea>
+            </div>
+          </div>
+
+          <!-- Terms -->
+          <div class="field">
+            <label>Terms &amp; Conditions</label>
+            <div class="editor-wrap" id="termsEditorWrap">
+              <div class="editor-toolbar" id="termsToolbar">
+                <button class="tb-btn" onclick="FORM.tbFormat('sf_terms','b')"><b>B</b></button>
+                <button class="tb-btn" onclick="FORM.tbFormat('sf_terms','i')"><i>I</i></button>
+                <button class="tb-btn" onclick="FORM.tbFormat('sf_terms','u')"><u>U</u></button>
+                <div class="tb-sep"></div>
+                <button class="tb-btn" onclick="FORM.tbPara('sf_terms')">¶</button>
+              </div>
+              <textarea id="sf_terms" rows="5" oninput="FORM.onBodyChange()"
+                style="border-radius:0 0 var(--radius) var(--radius)!important"></textarea>
+            </div>
+          </div>
+
+          <!-- Closing -->
+          <div class="field">
+            <label>Closing Line</label>
+            <input id="sf_closing" oninput="FORM.onBodyChange()">
+          </div>
         </div>
 
         <!-- SIGNATURES -->
@@ -1969,6 +2106,14 @@ input,textarea,select{font-family:'DM Sans',sans-serif}
             <option value="pending_ref">Pending Ref</option>
             <option value="void">Voided</option>
           </select>
+        </div>
+        <div class="field" style="align-self:end">
+          <label style="display:flex;align-items:center;gap:6px;
+            cursor:pointer;margin-top:8px;font-size:12px;color:var(--ink-4)">
+            <input type="checkbox" id="hist_showTest"
+              onchange="HIST.search()">
+            🧪 Show test letters
+          </label>
         </div>
         <div class="field">
           <label>Keyword</label>
@@ -2820,6 +2965,51 @@ input,textarea,select{font-family:'DM Sans',sans-serif}
 ════════════════════════════════════════════════════════════════ -->
 <div id="printContainer" class="print-only"></div>
 
+<!-- SUPABASE STATUS POPUP -->
+<div class="modal-overlay" id="statusModal">
+  <div class="modal-box" style="max-width:400px">
+    <div class="modal-title">⚡ Server Status</div>
+    <div id="statusModalContent" style="font-size:13px">
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;
+          padding:8px 12px;background:var(--surface-2);border-radius:var(--radius)">
+          <span style="color:var(--ink-3)">Connection</span>
+          <span id="sm_connection" style="font-family:'DM Mono',monospace;font-size:12px"></span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;
+          padding:8px 12px;background:var(--surface-2);border-radius:var(--radius)">
+          <span style="color:var(--ink-3)">Last Ping</span>
+          <span id="sm_lastPing" style="font-family:'DM Mono',monospace;font-size:12px"></span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;
+          padding:8px 12px;background:var(--surface-2);border-radius:var(--radius)">
+          <span style="color:var(--ink-3)">Latency</span>
+          <span id="sm_latency" style="font-family:'DM Mono',monospace;font-size:12px"></span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;
+          padding:8px 12px;background:var(--surface-2);border-radius:var(--radius)">
+          <span style="color:var(--ink-3)">Keepalive</span>
+          <span id="sm_keepalive" style="font-family:'DM Mono',monospace;font-size:12px"></span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;
+          padding:8px 12px;background:var(--surface-2);border-radius:var(--radius)">
+          <span style="color:var(--ink-3)">Pause Risk</span>
+          <span id="sm_pauseRisk" style="font-family:'DM Mono',monospace;font-size:12px"></span>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary btn-sm" onclick="KEEPALIVE.pingNow()">
+        Ping Now
+      </button>
+      <button class="btn btn-secondary"
+        onclick="document.getElementById('statusModal').classList.remove('open')">
+        Close
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- ════════════════════════════════════════════════════════════
      JAVASCRIPT — FOUNDATION LAYER
 ════════════════════════════════════════════════════════════════ -->
@@ -3585,12 +3775,13 @@ const DATA = {
   },
 
   // ── History ─────────────────────────────────────────────────
-  async getHistory({ lot, sub, dateFrom, dateTo, status, page = 1 } = {}) {
+  async getHistory({ lot, sub, dateFrom, dateTo, status, page = 1, showTest = false } = {}) {
     let q = SB.from('history')
-      .select('id,ref_no,temp_ref,ref_status,letter_date,lot,house_no,d_cycle,subcontractor,sub_short_code,submitted_by,submitted_at,jpeg_drive_url,version,current_version,voided_at', { count: 'exact' })
+      .select('id,ref_no,temp_ref,ref_status,letter_date,lot,house_no,d_cycle,subcontractor,sub_short_code,submitted_by,submitted_at,jpeg_drive_url,version,current_version,voided_at,is_test', { count: 'exact' })
       .eq('current_version', true)
       .order('submitted_at', { ascending: false });
 
+    if (!showTest) q = q.eq('is_test', false);
     if (lot)      q = q.eq('lot', lot);
     if (sub)      q = q.eq('sub_short_code', sub);
     if (status)   q = q.eq('ref_status', status);
@@ -4028,6 +4219,54 @@ const UI = {
     document.getElementById('pwConfirmModal').value = '';
     document.getElementById('pwChangeErr').classList.remove('show');
     document.getElementById('pwChangeModal').classList.add('open');
+  },
+
+  async showStatusPopup() {
+    document.getElementById('statusModal').classList.add('open');
+    // Fill in current data
+    const statMap = {
+      online:     { text: '🟢 Online',     color: 'var(--green)' },
+      degraded:   { text: '🟡 Degraded',   color: 'var(--amber)' },
+      offline:    { text: '🔴 Offline',    color: 'var(--red)'   },
+      connecting: { text: '🟡 Connecting', color: 'var(--amber)' },
+    };
+    const stat = statMap[STATE.netStatus] || statMap.connecting;
+
+    UI._smSet('sm_connection', stat.text, stat.color);
+    UI._smSet('sm_lastPing',
+      STATE.lastPingAt ? UI.relativeTime(STATE.lastPingAt) : 'Never', '');
+
+    // Measure latency
+    const t0 = Date.now();
+    try {
+      await SB.from('keepalive').select('created_at').limit(1);
+      const ms = Date.now() - t0;
+      const latColor = ms < 500 ? 'var(--green)' : ms < 2000 ? 'var(--amber)' : 'var(--red)';
+      UI._smSet('sm_latency', ms + 'ms', latColor);
+    } catch(e) {
+      UI._smSet('sm_latency', 'Failed', 'var(--red)');
+    }
+
+    // Keepalive status
+    try {
+      const { data } = await SB.rpc('check_keepalive');
+      if (data) {
+        const days = data.days_since;
+        const kColor = data.warning ? 'var(--red)' : 'var(--green)';
+        UI._smSet('sm_keepalive', `${days}d ago`, kColor);
+        UI._smSet('sm_pauseRisk',
+          data.warning ? '⚠ YES — ping now!' : '✓ Safe',
+          data.warning ? 'var(--red)' : 'var(--green)');
+      }
+    } catch(e) {
+      UI._smSet('sm_keepalive', 'Unknown', 'var(--ink-4)');
+      UI._smSet('sm_pauseRisk', 'Unknown', 'var(--ink-4)');
+    }
+  },
+
+  _smSet(id, text, color) {
+    const el = document.getElementById(id);
+    if (el) { el.textContent = text; if (color) el.style.color = color; }
   },
 
   showPendingRefPanel() {
@@ -4570,6 +4809,7 @@ const FORM = {
 
   // ── Form state ────────────────────────────────────────────
   _state: {
+    isTest:       false,
     projectId:    null,
     lot:          null,
     projectTitle: '',
@@ -4630,6 +4870,9 @@ const FORM = {
 
     // Offline banner
     FORM._updateOfflineBanner();
+
+    // Apply body permissions based on role
+    FORM._applyBodyPermissions();
 
     // Zoom init
     FORM._applyZoom();
@@ -4770,6 +5013,67 @@ const FORM = {
     FORM._state.closing = document.getElementById('sf_closing').value;
   },
 
+  // ── Toggle letter body section ────────────────────────────
+  toggleBodySection() {
+    const section = document.getElementById('letterBodySection');
+    const btn     = document.getElementById('bodyToggleBtn');
+    if (!section) return;
+    const isHidden = section.style.display === 'none';
+    section.style.display = isHidden ? '' : 'none';
+    if (btn) btn.textContent = isHidden ? '▲ Hide' : '▼ Show';
+  },
+
+  // ── Set body section editable/readonly based on role ─────
+  _applyBodyPermissions() {
+    const isAdmin   = STATE.user?.role === 'admin';
+    const toolbar   = document.getElementById('bodyAdminToolbar');
+    const bTb       = document.getElementById('bodyToolbar');
+    const tTb       = document.getElementById('termsToolbar');
+    const sfBody    = document.getElementById('sf_body');
+    const sfTerms   = document.getElementById('sf_terms');
+    const sfClosing = document.getElementById('sf_closing');
+
+    if (toolbar)   toolbar.style.display   = isAdmin ? '' : 'none';
+    if (bTb)       bTb.style.display       = isAdmin ? '' : 'none';
+    if (tTb)       tTb.style.display       = isAdmin ? '' : 'none';
+
+    // Read-only for non-admin — greyed out
+    [sfBody, sfTerms, sfClosing].forEach(el => {
+      if (!el) return;
+      el.readOnly = !isAdmin;
+      el.style.background = isAdmin ? '' : 'var(--surface-2)';
+      el.style.color      = isAdmin ? '' : 'var(--ink-3)';
+      el.title            = isAdmin ? '' : 'Only admins can edit letter body. Contact your admin to change defaults.';
+    });
+  },
+
+  // ── Save body/terms/closing as system default ─────────────
+  async saveBodyAsDefault() {
+    if (STATE.user?.role !== 'admin') {
+      toast('Only admins can save defaults', 'err'); return;
+    }
+    const body    = document.getElementById('sf_body').value;
+    const terms   = document.getElementById('sf_terms').value;
+    const closing = document.getElementById('sf_closing').value;
+
+    showLoading('Saving as default…');
+    try {
+      await Promise.all([
+        DATA.saveSystemConfig('default_body_text',    body),
+        DATA.saveSystemConfig('default_terms_text',   terms),
+        DATA.saveSystemConfig('default_closing_text', closing),
+      ]);
+      // Invalidate config cache so next load gets fresh defaults
+      DATA._setCache('systemConfig', null);
+      hideLoading();
+      LOG.activity('config_save', 'Letter body saved as default by admin', '');
+      toast('Saved as default for all future letters ✓', 'ok');
+    } catch(e) {
+      hideLoading();
+      toast('Save failed: ' + e.message, 'err');
+    }
+  },
+
   // ── PIC selection ─────────────────────────────────────────
   async onPicSelect(type) {
     const selId = type === 'issuer' ? 'sf_issuerSelect' : 'sf_verifierSelect';
@@ -4827,6 +5131,10 @@ const FORM = {
       subName:      '',
       subShortCode: '',
       defectItems:  [
+        { description: '', remarks: '' },
+        { description: '', remarks: '' },
+        { description: '', remarks: '' },
+        { description: '', remarks: '' },
         { description: '', remarks: '' },
         { description: '', remarks: '' },
         { description: '', remarks: '' },
@@ -4975,16 +5283,21 @@ const FORM = {
   },
 
   goToPreview() {
-    // Validate
-    const err = FORM._validate();
-    if (err) { toast(err, 'err'); return; }
-
+    // Sync state from DOM
     FORM._state.body    = document.getElementById('sf_body').value;
     FORM._state.terms   = document.getElementById('sf_terms').value;
     FORM._state.closing = document.getElementById('sf_closing').value;
     FORM._state.houseNo = document.getElementById('sf_houseNo').value.trim();
     FORM._state.dateFromBuyer = document.getElementById('sf_dateFromBuyer').value;
     FORM._state.letterDate    = document.getElementById('sf_letterDate').value;
+
+    // Show warning if incomplete but DON'T block — let them preview
+    const err = FORM._validate();
+    if (err) {
+      FORM._showIncompleteWarning(err);
+    } else {
+      FORM._hideIncompleteWarning();
+    }
 
     FORM._state.previewIdx = 0;
     FORM._switchSub('preview');
@@ -4993,9 +5306,15 @@ const FORM = {
   },
 
   goToReview() {
+    // Show warning if incomplete but DON'T block — let them see review
+    const err = FORM._validate();
+    if (err) {
+      FORM._showIncompleteWarning(err);
+    } else {
+      FORM._hideIncompleteWarning();
+    }
     FORM._switchSub('review');
     FORM._renderReview();
-    // Show/hide offline banner on review
     const offline = STATE.netStatus === 'offline';
     document.getElementById('offlineReviewBanner').classList.toggle('show', offline);
   },
@@ -5213,6 +5532,12 @@ const FORM = {
   },
 
   // ── Zoom ──────────────────────────────────────────────────
+  // ── Test banner ──────────────────────────────────────────
+  _updateTestBanner() {
+    const el = document.getElementById('testModeBanner');
+    if (el) el.style.display = FORM._state.isTest ? '' : 'none';
+  },
+
   zoomIn()    { FORM._state.zoom = Math.min(150, FORM._state.zoom + 10); FORM._applyZoom(); },
   zoomOut()   { FORM._state.zoom = Math.max(40,  FORM._state.zoom - 10); FORM._applyZoom(); },
   zoomReset() { FORM._state.zoom = 85; FORM._applyZoom(); },
@@ -5233,6 +5558,21 @@ const FORM = {
     document.getElementById('offlineFormBanner')?.classList.toggle('show', offline);
   },
 
+  // ── Incomplete warning ────────────────────────────────────
+  _showIncompleteWarning(msg) {
+    const el  = document.getElementById('incompleteWarnBanner');
+    const msg_el = document.getElementById('incompleteWarnMsg');
+    if (el && msg_el) {
+      msg_el.textContent = msg + '.';
+      el.style.display = 'flex';
+    }
+  },
+
+  _hideIncompleteWarning() {
+    const el = document.getElementById('incompleteWarnBanner');
+    if (el) el.style.display = 'none';
+  },
+
   // ── Reset form ────────────────────────────────────────────
   resetForm() {
     if (!confirm('Clear the form? All entered data will be lost.')) return;
@@ -5245,18 +5585,50 @@ const FORM = {
     FORM._state.houseNo      = '';
     FORM._state.subs         = [];
     FORM._state.previewIdx   = 0;
+    FORM._state.isTest       = false;
+    const isTestCb = document.getElementById('sf_isTest');
+    if (isTestCb) isTestCb.checked = false;
+    FORM._updateTestBanner();
 
-    document.getElementById('sf_projectSelect').value = '';
-    document.getElementById('sf_projectTitle').value  = '';
-    document.getElementById('sf_locationLot').value   = '';
-    document.getElementById('sf_clientName').value    = '';
-    document.getElementById('sf_houseNo').value       = '';
-    document.getElementById('sf_dCycle').value        = '';
+    document.getElementById('sf_projectSelect').value   = '';
+    document.getElementById('sf_projectTitle').value    = '';
+    document.getElementById('sf_locationLot').value     = '';
+    document.getElementById('sf_clientName').value      = '';
+    document.getElementById('sf_houseNo').value         = '';
+    document.getElementById('sf_dCycle').value          = '';
     document.getElementById('sf_projItems').textContent = '–';
 
     const today = new Date().toISOString().slice(0, 10);
     document.getElementById('sf_letterDate').value    = today;
     document.getElementById('sf_dateFromBuyer').value = today;
+
+    // Reset test mode
+    const isTestCb = document.getElementById('sf_isTest');
+    if (isTestCb) isTestCb.checked = false;
+    FORM._state.isTest = false;
+    FORM._updateTestBanner();
+
+    // Reset body to defaults from config
+    DATA.getSystemConfig().then(cfg => {
+      const body = document.getElementById('sf_body');
+      const terms = document.getElementById('sf_terms');
+      const closing = document.getElementById('sf_closing');
+      if (body)    body.value    = cfg.default_body_text    || '';
+      if (terms)   terms.value   = cfg.default_terms_text   || '';
+      if (closing) closing.value = cfg.default_closing_text || '';
+      FORM._state.body    = body?.value    || '';
+      FORM._state.terms   = terms?.value   || '';
+      FORM._state.closing = closing?.value || '';
+    }).catch(() => {});
+
+    // Collapse body section
+    const bodySection = document.getElementById('letterBodySection');
+    const bodyBtn     = document.getElementById('bodyToggleBtn');
+    if (bodySection) bodySection.style.display = 'none';
+    if (bodyBtn)     bodyBtn.textContent        = '▼ Show';
+
+    // Hide warning banners
+    FORM._hideIncompleteWarning();
 
     FORM.addSubBlock();
     FORM._switchSub('details');
@@ -5267,7 +5639,14 @@ const FORM = {
   // ── Submit ────────────────────────────────────────────────
   async onSubmitClick() {
     const err = FORM._validate();
-    if (err) { toast(err, 'err'); return; }
+    if (err) {
+      FORM._showIncompleteWarning(err);
+      toast('Cannot submit: ' + err, 'err');
+      // Switch back to details so user can fix
+      FORM._switchSub('details');
+      return;
+    }
+    FORM._hideIncompleteWarning();
 
     const btn = document.getElementById('sf_submitBtn');
     btn.disabled    = true;
@@ -5321,6 +5700,7 @@ const FORM = {
           verifier_typed_font:  s.verifier?.sig_typed_font  || null,
           verifier_typed_color: s.verifier?.sig_typed_color || null,
           submitted_by:  STATE.user.username,
+          is_test:       FORM._state.isTest || false,
         };
 
         // Insert history row
@@ -5346,8 +5726,16 @@ const FORM = {
           if (defErr) console.warn('[FORM] defect insert:', defErr.message);
         }
 
-        if (offline) {
-          // Queue for ref number claim on reconnect
+        if (FORM._state.isTest) {
+          // TEST MODE — assign fake ref, no counter increment, no progress row
+          const testRef = 'TEST-' + s.lot + '-' + sub.subShortCode + '-' + Date.now();
+          await SB.from('history').update({
+            ref_no: testRef, ref_status: 'confirmed', d_cycle: 'D0'
+          }).eq('id', histId);
+          results.push({ sub: sub.subName, ref: testRef, pending: false, isTest: true });
+
+        } else if (offline) {
+          // OFFLINE — Queue for ref number claim on reconnect
           const tempRef = histRow.temp_ref;
           REF.addPending(histId, tempRef, s.lot, sub.subShortCode, sub.subName,
             s.houseNo, s.letterDate, STATE.user.username);
@@ -5468,9 +5856,10 @@ const FORM = {
                 ${UI.esc(r.sub)}
               </div>
               <div style="font-family:'DM Mono',monospace;font-size:12px;
-                color:${r.pending ? 'var(--amber)' : 'var(--green)'};font-weight:600">
+                color:${r.isTest ? 'var(--blue)' : r.pending ? 'var(--amber)' : 'var(--green)'};font-weight:600">
                 ${UI.esc(r.ref)}
-                ${r.pending ? ' <span style="font-size:10px;opacity:.7">(temp)</span>' : ''}
+                ${r.isTest   ? ' <span style="font-size:10px;opacity:.7">🧪 TEST</span>' : ''}
+                ${r.pending && !r.isTest ? ' <span style="font-size:10px;opacity:.7">(temp)</span>' : ''}
               </div>
               ${r.dCycle ? `<div style="font-size:11px;color:var(--ink-4);margin-top:2px">D Cycle: ${UI.esc(r.dCycle)}</div>` : ''}
             </div>
@@ -5483,7 +5872,7 @@ const FORM = {
             Real reference numbers will be assigned automatically when you reconnect.
           </div>` : ''}
         <div class="modal-footer">
-          <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove();FORM.resetForm()">
+          <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove();FORM.resetForm();FORM._switchSub('details')">
             New Submission
           </button>
           <button class="btn btn-primary" onclick="this.closest('.modal-overlay').remove();UI.switchPanel('history')">
@@ -5584,6 +5973,7 @@ const HIST = {
       dateTo:   document.getElementById('hist_dateTo').value,
       status:   document.getElementById('hist_status').value,
       keyword:  document.getElementById('hist_keyword').value.trim(),
+      showTest: document.getElementById('hist_showTest')?.checked || false,
     };
 
     const resultsEl = document.getElementById('hist_results');
@@ -5602,6 +5992,7 @@ const HIST = {
         dateFrom: HIST._lastQuery.dateFrom || undefined,
         dateTo:   HIST._lastQuery.dateTo   || undefined,
         status:   HIST._lastQuery.status   || undefined,
+        showTest: HIST._lastQuery.showTest || false,
         page,
       });
 
@@ -5683,15 +6074,18 @@ const HIST = {
   _renderCard(r, i) {
     const isPending = r.ref_status === 'pending_ref';
     const isVoid    = r.ref_status === 'void';
+    const isTest    = r.is_test === true;
     const refDisplay = isPending
       ? `⏳ ${UI.esc(r.temp_ref || 'Pending')}`
       : UI.esc(r.ref_no || '—');
 
-    const statusBadge = isPending
-      ? `<span class="badge badge-warn">PENDING REF</span>`
-      : isVoid
-        ? `<span class="badge badge-fail">VOID</span>`
-        : `<span class="badge badge-ok">CONFIRMED</span>`;
+    const statusBadge = isTest
+      ? `<span class="badge badge-blue">🧪 TEST</span>`
+      : isPending
+        ? `<span class="badge badge-warn">PENDING REF</span>`
+        : isVoid
+          ? `<span class="badge badge-fail">VOID</span>`
+          : `<span class="badge badge-ok">CONFIRMED</span>`;
 
     const driveBtn = r.jpeg_drive_url
       ? `<a href="${UI.esc(r.jpeg_drive_url)}" target="_blank" class="drive-link"
@@ -6275,8 +6669,13 @@ const HIST = {
         .eq('id', id);
       if (error) throw error;
 
+      // Mark ref_event as voided for KPI tracking
+      await SB.from('ref_events')
+        .update({ is_voided: true })
+        .eq('history_id', id);
+
       LOG.audit(STATE.user.username, 'VOID', 'history', id, reason);
-      LOG.activity('void', `Letter voided: ${reason}`, id);
+      LOG.activity('void', 'Letter voided: ' + reason, id);
 
       hideLoading();
       document.getElementById('voidHistModal').classList.remove('open');
@@ -8215,6 +8614,7 @@ const DASH = {
       ]);
       DASH._checkKeepAlive();
       DASH._updatePendingRefButton();
+      DASH.refreshStatus();
     } catch(e) {
       console.warn('[DASH] load failed:', e.message);
     }
@@ -8409,6 +8809,53 @@ const DASH = {
     if (btn) btn.style.display = STATE.pendingRefs.length > 0 ? '' : 'none';
   },
 
+  async refreshStatus() {
+    // Connection
+    const statMap = {
+      online:     '🟢 Online',
+      degraded:   '🟡 Degraded',
+      offline:    '🔴 Offline',
+      connecting: '🟡 Connecting',
+    };
+    DASH._set('dash_connStatus', statMap[STATE.netStatus] || '—');
+
+    // Latency
+    try {
+      const t0 = Date.now();
+      await SB.from('keepalive').select('created_at').limit(1);
+      const ms = Date.now() - t0;
+      const el = document.getElementById('dash_latency');
+      if (el) {
+        el.textContent = ms + 'ms';
+        el.style.color = ms < 500 ? 'var(--green)' : ms < 2000 ? 'var(--amber)' : 'var(--red)';
+      }
+    } catch(e) {
+      DASH._set('dash_latency', 'Failed');
+    }
+
+    // Keepalive
+    try {
+      const { data } = await SB.rpc('check_keepalive');
+      if (data) {
+        DASH._set('dash_lastKeepalive', data.days_since + 'd ago');
+        const riskEl = document.getElementById('dash_pauseRisk');
+        if (riskEl) {
+          riskEl.textContent = data.warning ? '⚠ At Risk' : '✓ Safe';
+          riskEl.style.color = data.warning ? 'var(--red)' : 'var(--green)';
+        }
+      }
+    } catch(e) {}
+
+    // Record counts
+    try {
+      const [h, p] = await Promise.all([
+        SB.from('history').select('*', { count:'exact', head:true }).eq('is_test', false),
+        SB.from('progress').select('*', { count:'exact', head:true }),
+      ]);
+      DASH._set('dash_dbSize', ((h.count||0) + (p.count||0)).toLocaleString() + ' rows');
+    } catch(e) {}
+  },
+
   _set(id, val) {
     const el = document.getElementById(id);
     if (el) el.textContent = val ?? '—';
@@ -8456,7 +8903,7 @@ const ANALYTICS = {
       // Fetch ref_events for the selected period
       let q = SB
         .from('ref_events')
-        .select('ref_no,lot,sub_short_code,sub_name,house_no,d_cycle,d_cycle_num,year_month,lot_sub_count,lot_overall_count,global_total,submitted_at,completion_date,days_to_complete')
+        .select('ref_no,lot,sub_short_code,sub_name,house_no,d_cycle,d_cycle_num,year_month,lot_sub_count,lot_overall_count,global_total,submitted_at,completion_date,days_to_complete,is_voided')
         .like('year_month', `${year}%`)
         .order('submitted_at', { ascending: true });
 
@@ -8480,14 +8927,17 @@ const ANALYTICS = {
   },
 
   _renderKPIs() {
-    const data = ANALYTICS._data;
-    const total = data.length;
+    const data    = ANALYTICS._data;
+    const total   = data.length;
+    const voided  = data.filter(r => r.is_voided).length;
+    const active  = data.filter(r => !r.is_voided);
 
-    const completed = data.filter(r => r.completion_date).length;
-    const compRate  = total > 0 ? Math.round((completed / total) * 100) : 0;
+    const completed = active.filter(r => r.completion_date).length;
+    const compRate  = active.length > 0 ? Math.round((completed / active.length) * 100) : 0;
+    const voidRate  = total > 0 ? Math.round((voided / total) * 100) : 0;
 
     const avgDays = completed > 0
-      ? Math.round(data.filter(r => r.days_to_complete != null)
+      ? Math.round(active.filter(r => r.days_to_complete != null)
           .reduce((s, r) => s + r.days_to_complete, 0) / completed)
       : 0;
 
@@ -8498,14 +8948,21 @@ const ANALYTICS = {
 
     const houses = new Set(data.map(r => `${r.lot}-${r.house_no}`)).size;
 
-    ANALYTICS._kpi('an_totalLetters',   total);
+    ANALYTICS._kpi('an_totalLetters',   total + (voided > 0 ? ` (${voided} void)` : ''));
     ANALYTICS._kpi('an_completionRate', compRate + '%');
     ANALYTICS._kpi('an_avgDaysComplete',avgDays > 0 ? avgDays + 'd' : '—');
     ANALYTICS._kpi('an_highestDCycle',  maxCycle > 0 ? 'D' + maxCycle : '—');
     ANALYTICS._kpi('an_activeHouses',   houses);
 
     const trendEl = document.getElementById('an_dCycleSub');
-    if (trendEl) trendEl.textContent = maxCycle > 1 ? `House ${maxCycleSub}` : '';
+    if (trendEl) trendEl.textContent = maxCycle > 1 ? 'House ' + maxCycleSub : '';
+
+    // Show void rate in trend
+    const compTrend = document.getElementById('an_compTrend');
+    if (compTrend && voidRate > 0) {
+      compTrend.textContent = voidRate + '% void rate';
+      compTrend.className   = 'kpi-trend' + (voidRate > 10 ? ' down' : '');
+    }
   },
 
   _kpi(id, val) {
