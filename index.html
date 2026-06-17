@@ -1763,7 +1763,7 @@ input,textarea,select{font-family:'DM Sans',sans-serif}
       <div class="card-hdr">
         <div>
           <div class="card-title">Defect Works Instruction</div>
-          <div class="card-sub">Fill common details once · add subcontractors · preview each letter · submit all</div>
+          <div class="card-sub" id="formCardSub">Fill common details once · add subcontractors · preview each letter · submit all</div>
         </div>
         <div class="ref-pill">
           <span class="ref-pill-dot"></span>
@@ -1972,7 +1972,7 @@ input,textarea,select{font-family:'DM Sans',sans-serif}
         <div id="sf_subBlocks"></div>
 
         <button class="btn btn-ghost" style="width:100%;margin-top:4px"
-          onclick="FORM.addSubBlock()">
+          onclick="FORM.addSubBlock()" id="addSubBtn">
           + Add Subcontractor
         </button>
 
@@ -3615,11 +3615,12 @@ const DATA = {
     const { data, error } = await SB
       .from('projects')
       .select('*, project_items(id,label,description,sort_order)')
-      .eq('active', true)
       .order('lot');
     if (error) throw error;
-    DATA._setCache('projects', data);
-    return data;
+    // Filter active client-side to handle null values from DB
+    const active = (data || []).filter(p => p.active !== false);
+    DATA._setCache('projects', active);
+    return active;
   },
 
   async saveProject(proj, items) {
@@ -3662,11 +3663,12 @@ const DATA = {
     const { data, error } = await SB
       .from('subcontractors')
       .select('*')
-      .eq('active', true)
       .order('name');
     if (error) throw error;
-    DATA._setCache('subcontractors', data);
-    return data;
+    // Filter active client-side to handle null values from DB
+    const active = (data || []).filter(s => s.active !== false);
+    DATA._setCache('subcontractors', active);
+    return active;
   },
 
   async saveSub(sub) {
@@ -3689,11 +3691,12 @@ const DATA = {
     const { data, error } = await SB
       .from('pics')
       .select('*')
-      .eq('active', true)
       .order('name');
     if (error) throw error;
-    DATA._setCache('pics', data);
-    return data;
+    // Filter active client-side to handle null values from DB
+    const active = (data || []).filter(p => p.active !== false);
+    DATA._setCache('pics', active);
+    return active;
   },
 
   async savePic(pic) {
@@ -4848,11 +4851,14 @@ const FORM = {
     // Load defaults from system config
     try {
       const cfg = await DATA.getSystemConfig();
-      document.getElementById('sf_body').value    = cfg.default_body_text    || '';
-      document.getElementById('sf_terms').value   = cfg.default_terms_text   || '';
-      document.getElementById('sf_closing').value = cfg.default_closing_text || '';
-      FORM._state.body    = document.getElementById('sf_body').value;
-      FORM._state.terms   = document.getElementById('sf_terms').value;
+      const bodyEl    = document.getElementById('sf_body');
+      const termsEl   = document.getElementById('sf_terms');
+      const closingEl = document.getElementById('sf_closing');
+      if (bodyEl)    bodyEl.value    = cfg.default_body_text    || '';
+      if (termsEl)   termsEl.value   = cfg.default_terms_text   || '';
+      if (closingEl) closingEl.value = cfg.default_closing_text || '';
+      FORM._state.body    = bodyEl?.value    || '';
+      FORM._state.terms   = termsEl?.value   || '';
       FORM._state.closing = document.getElementById('sf_closing').value;
     } catch(e) {}
 
@@ -5017,9 +5023,9 @@ const FORM = {
   toggleBodySection() {
     const section = document.getElementById('letterBodySection');
     const btn     = document.getElementById('bodyToggleBtn');
-    if (!section) return;
-    const isHidden = section.style.display === 'none';
-    section.style.display = isHidden ? '' : 'none';
+    if (!section) { console.warn('[FORM] letterBodySection not found'); return; }
+    const isHidden = section.style.display === 'none' || section.style.display === '';
+    section.style.display = isHidden ? 'block' : 'none';
     if (btn) btn.textContent = isHidden ? '▲ Hide' : '▼ Show';
   },
 
@@ -5283,6 +5289,10 @@ const FORM = {
   },
 
   goToPreview() {
+    // If no sub blocks rendered yet, trigger render
+    if (!FORM._state.subs.length) {
+      FORM.addSubBlock();
+    }
     // Sync state from DOM
     FORM._state.body    = document.getElementById('sf_body').value;
     FORM._state.terms   = document.getElementById('sf_terms').value;
@@ -5898,13 +5908,27 @@ document.getElementById('defectSubTabs').addEventListener('click', e => {
 const _origSwitchPanel = UI.switchPanel.bind(UI);
 UI.switchPanel = function(name) {
   _origSwitchPanel(name);
-  if (name === 'defectWork' && !FORM._initialized) {
-    FORM._initialized = true;
-    FORM.init();
-  }
-  // Update offline banner when switching to defect work
   if (name === 'defectWork') {
-    FORM._updateOfflineBanner();
+    if (!FORM._initialized) {
+      FORM._initialized = true;
+      // Show loading while form initializes
+      showLoading('Loading form…');
+      FORM.init().then(() => {
+        hideLoading();
+        FORM._updateOfflineBanner();
+        FORM._applyBodyPermissions();
+      }).catch(e => {
+        hideLoading();
+        console.error('[FORM] init failed:', e);
+        toast('Form load failed: ' + e.message, 'err');
+      });
+    } else {
+      // Already initialized - just refresh dropdowns
+      FORM._updateOfflineBanner();
+      FORM._applyBodyPermissions();
+      FORM._loadProjects();
+      FORM._loadPics();
+    }
   }
 };
 
@@ -9605,11 +9629,12 @@ const ADMIN = {
     showLoading('Saving project…');
     try {
       const proj = {
-        id: id || undefined, lot, title,
+        id: id || undefined, lot, title, active: true,
         location: location || null, client: client || null,
         house_range_from: from_ || null, house_range_to: to_ || null,
       };
       await DATA.saveProject(proj, ADMIN._projItems);
+      DATA._setCache('projects', null); // force fresh load
       hideLoading();
       ADMIN.clearProjForm();
       await ADMIN.loadProjects();
@@ -9624,7 +9649,12 @@ const ADMIN = {
     const el = document.getElementById('projList');
     if (!el) return;
     try {
-      const projects = await DATA.getProjects(true);
+      // Admin sees all projects including inactive
+      const { data: projects, error: pe } = await SB
+        .from('projects')
+        .select('*, project_items(id,label,description,sort_order)')
+        .order('lot');
+      if (pe) throw pe;
       if (!projects.length) {
         el.innerHTML = '<div style="padding:20px;color:var(--ink-4);font-size:13px">No projects. Add one above.</div>';
         return;
@@ -9721,9 +9751,10 @@ const ADMIN = {
     showLoading('Saving subcontractor…');
     try {
       await DATA.saveSub({
-        id: id || undefined, name, short_code: code, active,
+        id: id || undefined, name, short_code: code, active: active,
         contact_person: contact || null,
         phone: phone || null, email: email || null,
+        updated_at: new Date().toISOString(),
       });
       hideLoading();
       ADMIN.clearSubForm();
