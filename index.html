@@ -3026,12 +3026,12 @@ input,textarea,select{font-family:'DM Sans',sans-serif}
    Replace SUPABASE_URL and SUPABASE_ANON_KEY with your values.
    These are safe to be in the HTML — anon key has limited access.
 ═══════════════════════════════════════════════════════════════ */
-onst CFG = {
+const CFG = {
   SUPABASE_URL:      'https://yajwgxrglhpygzfbxaqk.supabase.co',  // ← replace
   SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlhandneHJnbGhweWd6ZmJ4YXFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0NDM2OTIsImV4cCI6MjA5NzAxOTY5Mn0.qM_-9-YIQdet8hYYnmsNkZM1HlmlzHwzGTFRxq6uYHs',                   // ← replace
   APP_VERSION:       '4.0.0',
   SESSION_TTL_HOURS: 8,
-  PING_INTERVAL_MS:  60_000,       // ping every 60s
+  PING_INTERVAL_MS:  120_000,      // ping every 120s
   NOTIF_POLL_MS:     300_000,      // poll notifications every 5min
   LOG_BATCH_MS:      30_000,       // flush log batch every 30s
   NET_TIMEOUT_MS:    8_000,        // consider degraded after 8s
@@ -3137,15 +3137,15 @@ const NET = {
 
   async _ping() {
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), CFG.NET_TIMEOUT_MS);
       const t0 = Date.now();
 
+      // Use lightweight SELECT — not INSERT — for health check
+      // This avoids flooding the keepalive table
       const { error } = await SB
-        .from('keepalive')
-        .insert({ pinged_by: 'frontend_load' });
+        .from('system_config')
+        .select('config_key')
+        .limit(1);
 
-      clearTimeout(timeout);
       const ms = Date.now() - t0;
       STATE.lastPingAt = new Date();
 
@@ -3154,7 +3154,19 @@ const NET = {
         return false;
       }
 
-      // If slow but not failed — degraded
+      // Only INSERT keepalive once per hour max
+      const lastKeepaliveInsert = parseInt(
+        sessionStorage.getItem('hyk_last_keepalive') || '0'
+      );
+      if (Date.now() - lastKeepaliveInsert > 3_600_000) {
+        SB.from('keepalive')
+          .insert({ pinged_by: 'frontend_heartbeat' })
+          .then(() => {
+            sessionStorage.setItem('hyk_last_keepalive', Date.now().toString());
+          })
+          .catch(() => {});
+      }
+
       if (ms > CFG.NET_TIMEOUT_MS * 0.75) {
         NET._setStatus('degraded');
       }
@@ -3238,9 +3250,13 @@ const NET = {
   startHeartbeat() {
     clearInterval(STATE._pingTimer);
     STATE._pingTimer = setInterval(NET.heartbeat, CFG.PING_INTERVAL_MS);
-    // Also ping on tab focus
+    // Ping on tab focus but debounced — max once per 30 seconds
+    let _lastVisibilityPing = 0;
     document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) NET.heartbeat();
+      if (!document.hidden && Date.now() - _lastVisibilityPing > 30_000) {
+        _lastVisibilityPing = Date.now();
+        NET.heartbeat();
+      }
     });
   },
 };
@@ -3250,7 +3266,11 @@ const NET = {
 ═══════════════════════════════════════════════════════════════ */
 const KEEPALIVE = {
 
+  _checked: false,
+
   async check() {
+    if (KEEPALIVE._checked) return; // Only check once per session
+    KEEPALIVE._checked = true;
     try {
       const { data, error } = await SB.rpc('check_keepalive');
       if (error || !data) return;
@@ -3259,7 +3279,7 @@ const KEEPALIVE = {
         const msg    = document.getElementById('keepaliveWarnMsg');
         if (banner && msg) {
           msg.textContent =
-            `Server last pinged ${data.days_since} days ago — pause risk zone. Ping now to reset.`;
+            'Server last pinged ' + data.days_since + ' days ago — pause risk zone. Ping now to reset.';
           banner.classList.add('show');
         }
       }
@@ -8648,7 +8668,6 @@ const DASH = {
         DASH._loadOverdue(),
         DASH._loadActivity(),
       ]);
-      DASH._checkKeepAlive();
       DASH._updatePendingRefButton();
       DASH.refreshStatus();
     } catch(e) {
@@ -8827,17 +8846,7 @@ const DASH = {
   },
 
   async _checkKeepAlive() {
-    try {
-      const { data } = await SB.rpc('check_keepalive');
-      if (data?.warning) {
-        const warn = document.getElementById('dashKeepAliveWarn');
-        const msg  = document.getElementById('dashKeepAliveMsg');
-        if (warn && msg) {
-          msg.textContent = `Server last pinged ${data.days_since} days ago — pause risk.`;
-          warn.classList.add('show');
-        }
-      }
-    } catch(e) {}
+    // Handled by KEEPALIVE.check() in _beginSession — no-op here
   },
 
   _updatePendingRefButton() {
@@ -8869,15 +8878,18 @@ const DASH = {
       DASH._set('dash_latency', 'Failed');
     }
 
-    // Keepalive
+    // Keepalive — only check once per session, cache result
     try {
-      const { data } = await SB.rpc('check_keepalive');
-      if (data) {
-        DASH._set('dash_lastKeepalive', data.days_since + 'd ago');
-        const riskEl = document.getElementById('dash_pauseRisk');
-        if (riskEl) {
-          riskEl.textContent = data.warning ? '⚠ At Risk' : '✓ Safe';
-          riskEl.style.color = data.warning ? 'var(--red)' : 'var(--green)';
+      if (!DASH._keepaliveChecked) {
+        DASH._keepaliveChecked = true;
+        const { data } = await SB.rpc('check_keepalive');
+        if (data) {
+          DASH._set('dash_lastKeepalive', data.days_since + 'd ago');
+          const riskEl = document.getElementById('dash_pauseRisk');
+          if (riskEl) {
+            riskEl.textContent = data.warning ? '⚠ At Risk' : '✓ Safe';
+            riskEl.style.color = data.warning ? 'var(--red)' : 'var(--green)';
+          }
         }
       }
     } catch(e) {}
