@@ -11,6 +11,11 @@
 <!-- ── CDN Libraries ── -->
 <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tiptap/core@2.3.0/dist/tiptap-core.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tiptap/starter-kit@2.3.0/dist/tiptap-starter-kit.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tiptap/extension-underline@2.3.0/dist/tiptap-extension-underline.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tiptap/extension-text-align@2.3.0/dist/tiptap-extension-text-align.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/signature_pad@4.1.7/dist/signature_pad.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
@@ -3021,7 +3026,7 @@ input,textarea,select{font-family:'DM Sans',sans-serif}
    Replace SUPABASE_URL and SUPABASE_ANON_KEY with your values.
    These are safe to be in the HTML — anon key has limited access.
 ═══════════════════════════════════════════════════════════════ */
-const CFG = {
+onst CFG = {
   SUPABASE_URL:      'https://yajwgxrglhpygzfbxaqk.supabase.co',  // ← replace
   SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlhandneHJnbGhweWd6ZmJ4YXFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0NDM2OTIsImV4cCI6MjA5NzAxOTY5Mn0.qM_-9-YIQdet8hYYnmsNkZM1HlmlzHwzGTFRxq6uYHs',                   // ← replace
   APP_VERSION:       '4.0.0',
@@ -5377,15 +5382,16 @@ const FORM = {
           .replace(/&lt;u&gt;/g, '<u>').replace(/&lt;\/u&gt;/g, '</u>')
       }</li>`).join('');
 
-    const defectItems = sub.defectItems.filter(d => d.description.trim());
-    const defectRows  = defectItems.length
-      ? defectItems.map((it, i) =>
-          `<tr>
-            <td align="center">${i + 1}</td>
-            <td>${UI.esc(it.description)}</td>
-            <td>${UI.esc(it.remarks)}</td>
-          </tr>`).join('')
-      : '<tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>';
+    // Always render 9 rows — pad with blanks if fewer items filled
+    const filledItems = sub.defectItems.filter(d => d.description.trim());
+    const paddedItems = [...sub.defectItems]; // include all 9 (even empty)
+    while (paddedItems.length < 9) paddedItems.push({ description: '', remarks: '' });
+    const defectRows = paddedItems.map((it, i) =>
+      `<tr>
+        <td align="center" style="font-size:10pt;padding:2pt 4pt">${i + 1}</td>
+        <td style="font-size:10pt;padding:2pt 4pt">${UI.esc(it.description || '')}</td>
+        <td style="font-size:10pt;padding:2pt 4pt">${UI.esc(it.remarks || '')}</td>
+      </tr>`).join('');
 
     const sigBlock = (title, pic, isRight) => {
       if (!pic) return '';
@@ -5895,8 +5901,14 @@ const FORM = {
 document.getElementById('defectSubTabs').addEventListener('click', e => {
   const btn = e.target.closest('.sub-tab');
   if (!btn || btn.disabled) return;
-  // Only allow manual nav to details; preview/review go through buttons
-  if (btn.dataset.sub === 'details') FORM.goToDetails();
+  const target = btn.dataset.sub;
+  if (target === 'details') {
+    FORM.goToDetails();
+  } else if (target === 'preview') {
+    FORM.goToPreview();
+  } else if (target === 'review') {
+    FORM.goToReview();
+  }
 });
 
 // ── Init form when panel is shown ─────────────────────────
@@ -6229,14 +6241,18 @@ const HIST = {
     const defects = (r.history_defects || [])
       .sort((a, b) => a.item_no - b.item_no);
 
-    const defectRows = defects.length
-      ? defects.map(d =>
-          `<tr>
-            <td align="center">${d.item_no}</td>
-            <td>${UI.esc(d.description)}</td>
-            <td>${UI.esc(d.remarks || '')}</td>
-          </tr>`).join('')
-      : '<tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>';
+    // Always show 9 rows — pad with blanks
+    const MIN_ROWS = 9;
+    const paddedDefects = [...defects];
+    while (paddedDefects.length < MIN_ROWS) {
+      paddedDefects.push({ item_no: paddedDefects.length + 1, description: '', remarks: '' });
+    }
+    const defectRows = paddedDefects.map(d =>
+      `<tr>
+        <td align="center">${d.item_no || ''}</td>
+        <td>${UI.esc(d.description || '')}</td>
+        <td>${UI.esc(d.remarks || '')}</td>
+      </tr>`).join('');
 
     const sigBlock = (title, name, company, sigUrl, sigType, typedName, typedFont, typedColor, isRight) => {
       if (!name) return '';
