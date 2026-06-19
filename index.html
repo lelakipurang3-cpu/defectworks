@@ -3855,6 +3855,76 @@ const DATA = {
     return data;
   },
 
+  // ── D Cycle calculation ─────────────────────────────────
+  // Determines correct D cycle for a sub+house combination
+  // Rules:
+  //   No records at all → D1
+  //   Sub never worked house, house has only complete cycles → maxD+1
+  //   Sub never worked house, house has open cycle → join open cycle (same D)
+  //   Sub has worked house before → their maxD + 1 (always new cycle)
+  async calcDCycle(lot, houseNo, subId, subShortCode) {
+    try {
+      // Get all progress rows for this house
+      const { data: progressRows } = await SB
+        .from('progress')
+        .select('id, d_cycle, d_cycle_num, is_complete')
+        .eq('lot', lot)
+        .eq('house_no', houseNo)
+        .order('d_cycle_num', { ascending: false });
+
+      // CASE 1: House has never been submitted before
+      if (!progressRows || progressRows.length === 0) {
+        return { dCycle: 'D1', dCycleNum: 1, progressId: null, isNew: true };
+      }
+
+      const maxDNum = Math.max(...progressRows.map(r => r.d_cycle_num));
+      const maxD    = 'D' + maxDNum;
+
+      // Check if this sub has ANY non-void letters for this house
+      const { data: subHistory } = await SB
+        .from('history')
+        .select('id, d_cycle, ref_status')
+        .eq('lot', lot)
+        .eq('house_no', houseNo)
+        .eq('sub_id', subId)
+        .neq('ref_status', 'void')
+        .eq('current_version', true);
+
+      const subHasWorkedHere = subHistory && subHistory.length > 0;
+
+      if (!subHasWorkedHere) {
+        // Sub never worked this house
+        // Check if ALL progress rows are complete
+        const allComplete = progressRows.every(r => r.is_complete);
+
+        if (allComplete) {
+          // All complete → new round → maxD + 1
+          const newDNum = maxDNum + 1;
+          return { dCycle: 'D' + newDNum, dCycleNum: newDNum, progressId: null, isNew: true };
+        } else {
+          // Open work exists → sub joins current open cycle
+          // Find the latest open progress row
+          const openRow = progressRows.find(r => !r.is_complete) || progressRows[0];
+          return {
+            dCycle: openRow.d_cycle,
+            dCycleNum: openRow.d_cycle_num,
+            progressId: openRow.id,
+            isNew: false  // join existing row
+          };
+        }
+      } else {
+        // Sub has worked this house before → always new cycle (maxD + 1)
+        const newDNum = maxDNum + 1;
+        return { dCycle: 'D' + newDNum, dCycleNum: newDNum, progressId: null, isNew: true };
+      }
+
+    } catch(e) {
+      console.error('[DATA] calcDCycle failed:', e.message);
+      // Safe fallback
+      return { dCycle: 'D1', dCycleNum: 1, progressId: null, isNew: true };
+    }
+  },
+
   async updateSubStatus(progressSubId, newStatus) {
     if (STATE.netStatus === 'offline') {
       toast('Cannot update status while offline', 'err');
@@ -5760,11 +5830,12 @@ const FORM = {
 
         if (FORM._state.isTest) {
           // TEST MODE — assign fake ref, no counter increment, no progress row
+          const dCycleInfo = await DATA.calcDCycle(s.lot, s.houseNo, sub.subId, sub.subShortCode);
           const testRef = 'TEST-' + s.lot + '-' + sub.subShortCode + '-' + Date.now();
           await SB.from('history').update({
-            ref_no: testRef, ref_status: 'confirmed', d_cycle: 'D0'
+            ref_no: testRef, ref_status: 'confirmed', d_cycle: dCycleInfo.dCycle
           }).eq('id', histId);
-          results.push({ sub: sub.subName, ref: testRef, pending: false, isTest: true });
+          results.push({ sub: sub.subName, ref: testRef, pending: false, isTest: true, dCycle: dCycleInfo.dCycle });
 
         } else if (offline) {
           // OFFLINE — Queue for ref number claim on reconnect
@@ -5784,42 +5855,56 @@ const FORM = {
           }, { onConflict: 'lot,house_no,d_cycle', ignoreDuplicates: true });
 
         } else {
-          // Claim real ref number via SQL function
+          // Pre-calculate D cycle for this sub using business logic
+          const dCycleInfo = await DATA.calcDCycle(
+            s.lot, s.houseNo, sub.subId, sub.subShortCode
+          );
+
+          // Claim real ref number via SQL function with d_cycle override
           const { data: refData, error: refErr } = await SB.rpc('claim_ref_number', {
-            p_lot:          s.lot,
-            p_sub_code:     sub.subShortCode,
-            p_sub_name:     sub.subName,
-            p_house_no:     s.houseNo,
-            p_letter_date:  s.letterDate,
-            p_submitted_by: STATE.user.username,
-            p_history_id:   histId,
+            p_lot:                 s.lot,
+            p_sub_code:            sub.subShortCode,
+            p_sub_name:            sub.subName,
+            p_house_no:            s.houseNo,
+            p_letter_date:         s.letterDate,
+            p_submitted_by:        STATE.user.username,
+            p_history_id:          histId,
+            p_d_cycle_override:     dCycleInfo.dCycle,
+            p_d_cycle_num_override: dCycleInfo.dCycleNum,
           });
 
-          if (refErr) throw new Error(`Ref number failed for ${sub.subName}: ${refErr.message}`);
+          if (refErr) throw new Error('Ref number failed for ' + sub.subName + ': ' + refErr.message);
 
           results.push({ sub: sub.subName, ref: refData.ref_no, pending: false, dCycle: refData.d_cycle });
 
-          // Insert progress_sub row
-          const { data: progressData } = await SB
-            .from('progress')
-            .select('id')
-            .eq('lot', s.lot)
-            .eq('house_no', s.houseNo)
-            .eq('d_cycle', refData.d_cycle)
-            .single();
+          // Get or create progress row for this d_cycle
+          let progressId = dCycleInfo.progressId; // may be set if joining existing row
 
-          if (progressData) {
+          if (!progressId) {
+            // New progress row was created by SQL function — fetch its id
+            const { data: progressData } = await SB
+              .from('progress')
+              .select('id')
+              .eq('lot', s.lot)
+              .eq('house_no', s.houseNo)
+              .eq('d_cycle', refData.d_cycle)
+              .single();
+            progressId = progressData?.id || null;
+          }
+
+          if (progressId) {
+            // Upsert progress_sub — handles both new and joining existing row
             await SB.from('progress_subs').upsert({
-              progress_id:    progressData.id,
+              progress_id:    progressId,
               sub_id:         sub.subId,
               sub_name:       sub.subName,
               sub_short_code: sub.subShortCode,
               status:         'pending',
               history_id:     histId,
               ref_no:         refData.ref_no,
-            }, { onConflict: 'progress_id,sub_id', ignoreDuplicates: true });
+            }, { onConflict: 'progress_id,sub_id', ignoreDuplicates: false });
 
-            // Set date_to_subcon and house_due_date
+            // Update dates on progress row
             const { data: dueDate } = await SB.rpc('calc_due_date', {
               start_date:   s.letterDate,
               working_days: 14,
@@ -5829,7 +5914,7 @@ const FORM = {
               date_from_buyer: s.dateFromBuyer || null,
               date_to_subcon:  s.letterDate,
               house_due_date:  dueDate,
-            }).eq('id', progressData.id);
+            }).eq('id', progressId);
           }
         }
       }
@@ -6347,6 +6432,118 @@ const HIST = {
 </div>`;
   },
 
+  // ── INLINE-STYLED VERSION for html2canvas JPEG export ──────
+  // html2canvas does not reliably pick up styles from <style> blocks
+  // for dynamically created/off-screen elements. This version puts
+  // every formatting rule directly as a style="" attribute so the
+  // JPEG output always matches the on-screen preview exactly,
+  // including bold, underline, alignment, and spacing.
+  _buildLetterHTMLInline(r) {
+    const projLines = '';
+
+    const terms = (r.terms_text || '').split('\n').filter(t => t.trim())
+      .map(t => `<li style="margin-bottom:1pt;text-align:justify">${UI.esc(t)
+        .replace(/&lt;b&gt;/g,'<b>').replace(/&lt;\/b&gt;/g,'</b>')
+        .replace(/&lt;i&gt;/g,'<i>').replace(/&lt;\/i&gt;/g,'</i>')
+        .replace(/&lt;u&gt;/g,'<u>').replace(/&lt;\/u&gt;/g,'</u>')
+      }</li>`).join('');
+
+    const defects = (r.history_defects || []).sort((a, b) => a.item_no - b.item_no);
+    const MIN_ROWS = 9;
+    const paddedDefects = [...defects];
+    while (paddedDefects.length < MIN_ROWS) {
+      paddedDefects.push({ item_no: paddedDefects.length + 1, description: '', remarks: '' });
+    }
+    const tdStyle = 'border:1px solid #000;padding:2pt 4pt;font-size:10pt;vertical-align:top';
+    const defectRows = paddedDefects.map(d =>
+      `<tr>
+        <td align="center" style="${tdStyle}">${d.item_no || ''}</td>
+        <td style="${tdStyle}">${UI.esc(d.description || '')}</td>
+        <td style="${tdStyle}">${UI.esc(d.remarks || '')}</td>
+      </tr>`).join('');
+
+    const sigBlockInline = (title, name, company, sigUrl, sigType, typedName, typedFont, typedColor, isRight) => {
+      if (!name) return '';
+      let sigImg = '';
+      if (sigType === 'drawn' && sigUrl) {
+        sigImg = `<img src="${UI.esc(sigUrl)}" style="position:absolute;bottom:2px;left:0;max-width:140px;max-height:45px;opacity:.85">`;
+      } else if (sigType === 'typed' && typedName) {
+        sigImg = `<span style="position:absolute;bottom:2px;left:0;
+          font-family:'${UI.esc(typedFont)}',cursive;font-size:22px;
+          color:${UI.esc(typedColor||'#000')};white-space:nowrap">
+          ${UI.esc(typedName)}</span>`;
+      }
+      const innerAlign = isRight ? 'text-align:left;display:inline-block;width:100%' : '';
+      return `<div style="${innerAlign}">
+        <div style="margin-bottom:6pt">${UI.esc(title)},</div>
+        <div style="height:32pt;position:relative">
+          <div style="position:absolute;bottom:0;left:0;right:0;border-bottom:1px solid #000"></div>
+          ${sigImg}
+        </div>
+        <div style="font-weight:bold;font-size:10pt;margin-top:2pt;white-space:nowrap">${UI.esc(name)}</div>
+        <div style="font-weight:bold;font-size:9.5pt;white-space:nowrap">${UI.esc(company || '')}</div>
+      </div>`;
+    };
+
+    const refDisplay = r.ref_status === 'pending_ref'
+      ? (r.temp_ref || 'PENDING') + ' ⏳'
+      : (r.ref_no || '—');
+
+    const bodyHtml = UI.esc(r.body_text || '')
+      .replace(/&lt;b&gt;/g,'<b>').replace(/&lt;\/b&gt;/g,'</b>')
+      .replace(/&lt;i&gt;/g,'<i>').replace(/&lt;\/i&gt;/g,'</i>')
+      .replace(/&lt;u&gt;/g,'<u>').replace(/&lt;\/u&gt;/g,'</u>');
+
+    return `
+<p style="margin:0 0 2pt;font-size:10pt"><strong>Ref :</strong> ${UI.esc(refDisplay)}</p>
+<p style="margin:0 0 2pt;font-size:10pt"><strong>Date :</strong> ${UI.esc(r.letter_date || '')}</p>
+<p style="margin:0 0 2pt;font-size:10pt"><strong>To :</strong> ${UI.esc(r.subcontractor || '')}</p>
+<p style="margin:0 0 2pt;font-size:10pt"><strong>House No :</strong> ${UI.esc(r.house_no || '')}</p>
+<p style="margin:0 0 3pt">&nbsp;</p>
+<p style="margin:0 0 4pt;font-size:10pt">Dear sir,</p>
+<p style="margin:0 0 3pt">&nbsp;</p>
+<p style="margin:0 0 4pt;font-size:10.5pt;font-weight:bold">${UI.esc(r.project_title || '')}</p>
+<div style="margin-left:5pt;margin-bottom:4pt;font-size:10pt">${projLines}</div>
+<p style="margin:0 0 2pt;font-size:10.5pt"><strong>DI ATAS ${UI.esc(r.location || '')}</strong></p>
+<p style="margin:0 0 5pt;font-size:10.5pt;border-bottom:1px solid #000;padding-bottom:2pt">
+  <strong>UNTUK TETUAN: ${UI.esc(r.client || '')}</strong>
+</p>
+<p style="text-align:center;font-size:12pt;font-weight:bold;text-decoration:underline;margin:6pt 0">
+  TO RECTIFY DEFECT WORKS
+</p>
+<p style="text-align:justify;margin-bottom:4pt;font-size:10pt;line-height:1.35">${bodyHtml}</p>
+<p style="text-decoration:underline;margin-bottom:2pt;font-size:10pt">Term &amp; Conditions:-</p>
+<ol style="margin-left:18pt;margin-bottom:4pt;font-size:10pt">${terms}</ol>
+<p style="margin-bottom:5pt;font-size:10pt">${UI.esc(r.closing_text || '')}</p>
+<p style="margin:0 0 3pt">&nbsp;</p>
+<table border="1" cellspacing="0" cellpadding="3"
+  style="width:100%;border-collapse:collapse;font-size:10pt">
+  <thead><tr>
+    <td align="center" width="40" style="${tdStyle};font-weight:bold;background:#f0f0f0"><strong>No.</strong></td>
+    <td align="center" style="${tdStyle};font-weight:bold;background:#f0f0f0"><strong>Descriptions</strong></td>
+    <td align="center" width="180" style="${tdStyle};font-weight:bold;background:#f0f0f0"><strong>Remarks</strong></td>
+  </tr></thead>
+  <tbody>${defectRows}</tbody>
+</table>
+<p style="margin:0 0 3pt">&nbsp;</p>
+<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-top:8pt">
+  <div style="flex:0 0 auto">
+    ${sigBlockInline('Yours Faithfully',
+      r.issuer_name, r.issuer_company,
+      r.issuer_sig_url, r.issuer_sig_type,
+      r.issuer_typed_name, r.issuer_typed_font, r.issuer_typed_color,
+      false)}
+  </div>
+  <div style="flex:0 1 auto;max-width:48%;text-align:right">
+    ${sigBlockInline('Works Done and Verified by',
+      r.verifier_name, r.verifier_company,
+      r.verifier_sig_url, r.verifier_sig_type,
+      r.verifier_typed_name, r.verifier_typed_font, r.verifier_typed_color,
+      true)}
+  </div>
+</div>`;
+  },
+
   // ── Print ─────────────────────────────────────────────────
   async printLetter(id) {
     try {
@@ -6376,39 +6573,48 @@ const HIST = {
 
       // Render letter into hidden container
       // Render into a visible off-screen div for html2canvas
+      // CRITICAL: must include class="a4-sheet" AND inline all formatting
+      // styles directly, because html2canvas does not reliably read
+      // styles from <style> blocks for off-screen/cloned elements.
       const container = document.getElementById('printContainer');
       container.innerHTML = '';
-      
-      // Create a properly sized render target
+
       const renderDiv = document.createElement('div');
+      renderDiv.className = 'a4-sheet'; // keep class for any matched rules
       renderDiv.style.cssText = [
         'position:fixed',
         'left:-9999px',
         'top:0',
-        'width:794px',       // A4 at 96dpi
-        'min-height:1123px', // A4 at 96dpi
+        'width:794px',
+        'min-height:1123px',
         'background:#fff',
-        'padding:45px 53px', // ~12mm/14mm margins at 96dpi
-        'font-family:Times New Roman,serif',
-        'font-size:13.3px',  // 10pt at 96dpi
+        'padding:45px 53px',
+        'font-family:"Times New Roman",Times,serif',
+        'font-size:13.3px',
         'line-height:1.35',
         'color:#111827',
         'box-sizing:border-box',
         'z-index:-1',
       ].join(';');
-      renderDiv.innerHTML = HIST._buildLetterHTML(record);
+
+      // Build letter HTML then inline the key formatting styles
+      // directly onto elements so html2canvas captures them correctly
+      renderDiv.innerHTML = HIST._buildLetterHTMLInline(record);
       document.body.appendChild(renderDiv);
 
       // Wait for fonts/images to load
-      await new Promise(r => setTimeout(r, 300));
+      await document.fonts.ready;
+      await new Promise(r => setTimeout(r, 400));
 
       const canvas = await html2canvas(renderDiv, {
         scale: 2,
         useCORS: true,
+        allowTaint: true,
         backgroundColor: '#ffffff',
         width: 794,
         height: renderDiv.scrollHeight,
         windowWidth: 794,
+        logging: false,
       });
       document.body.removeChild(renderDiv);
       container.innerHTML = '';
