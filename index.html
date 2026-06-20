@@ -2966,6 +2966,81 @@ input,textarea,select{font-family:'DM Sans',sans-serif}
 </div>
 
 <!-- ════════════════════════════════════════════════════════════
+     D-CYCLE CONFIRMATION DIALOG
+     Shown when a house already has an OPEN D-cycle and the user
+     is about to submit letters for it. Lets them choose to join
+     the existing cycle or force a brand new one.
+════════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="dcycleConfirmModal">
+  <div class="modal-box" style="max-width:460px">
+    <div class="modal-title">⚠ Open D-Cycle Found</div>
+    <div style="font-size:13px;color:var(--ink-3);margin-bottom:16px;line-height:1.6">
+      House <strong id="dc_houseNo" style="color:var(--ink)">—</strong> already has an
+      <strong id="dc_openCycle" style="color:var(--amber)">—</strong>
+      cycle that is still open (not all subcontractors marked Done).
+    </div>
+
+    <div id="dc_openSubsList" style="background:var(--surface-2);border:1px solid var(--border);
+      border-radius:var(--radius);padding:10px 14px;margin-bottom:16px;font-size:12px;
+      color:var(--ink-3);line-height:1.8"></div>
+
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <button class="btn btn-primary" style="justify-content:flex-start;text-align:left;
+        padding:12px 16px;height:auto;white-space:normal" onclick="FORM._resolveDCycleChoice('join')">
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <span>✅ Join existing cycle (<span id="dc_joinLabel">D—</span>)</span>
+          <span style="font-size:11px;font-weight:400;opacity:.85">
+            Recommended — this is most likely the same complaint, just a missed letter
+          </span>
+        </div>
+      </button>
+      <button class="btn btn-secondary" style="justify-content:flex-start;text-align:left;
+        padding:12px 16px;height:auto;white-space:normal;border-color:var(--amber)"
+        onclick="FORM._resolveDCycleChoice('forceNew')">
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <span style="color:var(--amber-dark)">⚡ Force new cycle (<span id="dc_forceLabel">D—</span>)</span>
+          <span style="font-size:11px;font-weight:400;color:var(--ink-4)">
+            Admin override — use only if this is genuinely a new, separate complaint
+          </span>
+        </div>
+      </button>
+    </div>
+
+    <div class="modal-footer" style="margin-top:18px">
+      <button class="btn btn-secondary" onclick="FORM._resolveDCycleChoice('cancel')">
+        Cancel
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     FINAL REFERENCE NUMBER CONFIRMATION DIALOG
+     Shows the exact ref number(s) about to be assigned before
+     anything is written to the database.
+════════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="refConfirmModal">
+  <div class="modal-box wide">
+    <div class="modal-title">📋 Confirm Reference Number</div>
+    <div style="font-size:13px;color:var(--ink-3);margin-bottom:14px;line-height:1.6">
+      The following reference number(s) will be permanently assigned once you proceed.
+      This cannot be undone (letters can later be voided, but ref numbers are never reused).
+    </div>
+    <div id="refConfirmList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:18px">
+      <!-- populated by FORM._showRefConfirmModal -->
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="FORM._refConfirmReject()">
+        Cancel
+      </button>
+      <button class="btn btn-primary" id="refConfirmProceedBtn" onclick="FORM._refConfirmAccept()">
+        ✓ Confirm &amp; Proceed
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
      A4 PRINT CONTAINER (hidden, used for letter print)
 ════════════════════════════════════════════════════════════════ -->
 <div id="printContainer" class="print-only"></div>
@@ -3856,15 +3931,30 @@ const DATA = {
   },
 
   // ── D Cycle calculation ─────────────────────────────────
-  // Determines correct D cycle for a sub+house combination
-  // Rules:
-  //   No records at all → D1
-  //   Sub never worked house, house has only complete cycles → maxD+1
-  //   Sub never worked house, house has open cycle → join open cycle (same D)
-  //   Sub has worked house before → their maxD + 1 (always new cycle)
-  async calcDCycle(lot, houseNo, subId, subShortCode) {
+  // CORRECTED RULE (v8): a house can have AT MOST ONE open D-cycle at a
+  // time, regardless of which subcontractor or how many times that
+  // subcontractor has already appeared in this house's history.
+  //
+  //   No progress rows at all for this house        → D1 (new row)
+  //   An OPEN progress row exists (is_complete=false) → JOIN it.
+  //       Every sub being submitted — whether brand new to this house
+  //       or a repeat offender — lands in the SAME open d_cycle.
+  //   No open row (none exist, or all are complete)  → start new cycle,
+  //       d_cycle_num = max(existing) + 1 (or 1 if none exist)
+  //
+  // This intentionally removes the old "sub has worked here before →
+  // always force a new cycle" branch, which was the bug: it let a
+  // single sub (e.g. HYS) spawn D2 then D3 for the same still-open
+  // house instead of being grouped with the rest of D2.
+  //
+  // calcDCycle no longer makes the join/force decision unilaterally —
+  // it just reports what the OPEN state is. FORM.onSubmitClick uses
+  // this to show a confirmation dialog when an open cycle exists, and
+  // the user/admin explicitly chooses to "join" or "force new". The
+  // `forceNew` flag lets the same function compute what a forced new
+  // cycle number would be.
+  async calcDCycle(lot, houseNo, subId, subShortCode, forceNew = false) {
     try {
-      // Get all progress rows for this house
       const { data: progressRows } = await SB
         .from('progress')
         .select('id, d_cycle, d_cycle_num, is_complete')
@@ -3872,56 +3962,74 @@ const DATA = {
         .eq('house_no', houseNo)
         .order('d_cycle_num', { ascending: false });
 
-      // CASE 1: House has never been submitted before
+      // CASE 1: House has never had any progress row at all
       if (!progressRows || progressRows.length === 0) {
-        return { dCycle: 'D1', dCycleNum: 1, progressId: null, isNew: true };
+        return { dCycle: 'D1', dCycleNum: 1, progressId: null, isNew: true, hadOpenCycle: false };
       }
 
-      const maxDNum = Math.max(...progressRows.map(r => r.d_cycle_num));
-      const maxD    = 'D' + maxDNum;
+      const maxDNum  = Math.max(...progressRows.map(r => r.d_cycle_num));
+      const openRow  = progressRows.find(r => !r.is_complete) || null;
 
-      // Check if this sub has ANY non-void letters for this house
-      const { data: subHistory } = await SB
-        .from('history')
-        .select('id, d_cycle, ref_status')
-        .eq('lot', lot)
-        .eq('house_no', houseNo)
-        .eq('sub_id', subId)
-        .neq('ref_status', 'void')
-        .eq('current_version', true);
-
-      const subHasWorkedHere = subHistory && subHistory.length > 0;
-
-      if (!subHasWorkedHere) {
-        // Sub never worked this house
-        // Check if ALL progress rows are complete
-        const allComplete = progressRows.every(r => r.is_complete);
-
-        if (allComplete) {
-          // All complete → new round → maxD + 1
-          const newDNum = maxDNum + 1;
-          return { dCycle: 'D' + newDNum, dCycleNum: newDNum, progressId: null, isNew: true };
-        } else {
-          // Open work exists → sub joins current open cycle
-          // Find the latest open progress row
-          const openRow = progressRows.find(r => !r.is_complete) || progressRows[0];
-          return {
-            dCycle: openRow.d_cycle,
-            dCycleNum: openRow.d_cycle_num,
-            progressId: openRow.id,
-            isNew: false  // join existing row
-          };
-        }
-      } else {
-        // Sub has worked this house before → always new cycle (maxD + 1)
+      if (forceNew) {
+        // Explicit override — always start a brand new cycle, ignoring
+        // any currently open one. Used when the user picks
+        // "Force new D-cycle" in the confirmation dialog.
         const newDNum = maxDNum + 1;
-        return { dCycle: 'D' + newDNum, dCycleNum: newDNum, progressId: null, isNew: true };
+        return {
+          dCycle: 'D' + newDNum, dCycleNum: newDNum,
+          progressId: null, isNew: true,
+          hadOpenCycle: !!openRow,
+          openDCycle: openRow ? openRow.d_cycle : null,
+        };
       }
+
+      if (openRow) {
+        // CASE 2: An open cycle exists for this house — EVERYONE joins it.
+        // No distinction by sub history any more; this is the fix.
+        return {
+          dCycle: openRow.d_cycle,
+          dCycleNum: openRow.d_cycle_num,
+          progressId: openRow.id,
+          isNew: false,
+          hadOpenCycle: true,
+          openDCycle: openRow.d_cycle,
+        };
+      }
+
+      // CASE 3: No open row — all existing cycles are complete.
+      // Start a fresh cycle.
+      const newDNum = maxDNum + 1;
+      return {
+        dCycle: 'D' + newDNum, dCycleNum: newDNum,
+        progressId: null, isNew: true,
+        hadOpenCycle: false, openDCycle: null,
+      };
 
     } catch(e) {
       console.error('[DATA] calcDCycle failed:', e.message);
-      // Safe fallback
-      return { dCycle: 'D1', dCycleNum: 1, progressId: null, isNew: true };
+      return { dCycle: 'D1', dCycleNum: 1, progressId: null, isNew: true, hadOpenCycle: false };
+    }
+  },
+
+  // ── House-level open cycle lookup ───────────────────────
+  // Used by the pre-submission confirmation dialog to check, ONCE per
+  // house (not per sub), whether an open D-cycle already exists before
+  // the user is asked to confirm anything.
+  async getOpenCycleForHouse(lot, houseNo) {
+    try {
+      const { data, error } = await SB
+        .from('progress')
+        .select('id, d_cycle, d_cycle_num, is_complete, progress_subs(sub_name, sub_short_code, status)')
+        .eq('lot', lot)
+        .eq('house_no', houseNo)
+        .eq('is_complete', false)
+        .order('d_cycle_num', { ascending: false })
+        .limit(1);
+      if (error) throw error;
+      return (data && data[0]) || null;
+    } catch(e) {
+      console.error('[DATA] getOpenCycleForHouse failed:', e.message);
+      return null;
     }
   },
 
@@ -5738,6 +5846,122 @@ const FORM = {
     toast('Form cleared', 'ok');
   },
 
+  // ── D-cycle / ref-confirm dialog resolvers ─────────────────
+  // These two modals are driven by Promise resolvers stashed on FORM
+  // so onSubmitClick can simply `await` user input mid-flow.
+  _dcyclePromiseResolve: null,
+  _refConfirmPromiseResolve: null,
+
+  // Shows the "open cycle found" dialog for ONE house and resolves
+  // with 'join' | 'forceNew' | 'cancel'.
+  _askDCycleChoice(houseNo, openRow) {
+    return new Promise(resolve => {
+      FORM._dcyclePromiseResolve = resolve;
+
+      document.getElementById('dc_houseNo').textContent   = houseNo;
+      document.getElementById('dc_openCycle').textContent = openRow.d_cycle;
+      document.getElementById('dc_joinLabel').textContent  = openRow.d_cycle;
+
+      const forcedNum = (openRow.d_cycle_num || 0) + 1;
+      document.getElementById('dc_forceLabel').textContent = 'D' + forcedNum;
+
+      const subs = (openRow.progress_subs || []);
+      const listEl = document.getElementById('dc_openSubsList');
+      listEl.innerHTML = subs.length
+        ? 'Currently in ' + UI.esc(openRow.d_cycle) + ':<br>' +
+          subs.map(s =>
+            '• ' + UI.esc(s.sub_name) + ' — <span style="color:var(--ink-4)">' +
+            UI.esc(PROG._statusLabel ? PROG._statusLabel(s.status) : s.status) + '</span>'
+          ).join('<br>')
+        : 'No subcontractors recorded yet on this cycle.';
+
+      document.getElementById('dcycleConfirmModal').classList.add('open');
+    });
+  },
+
+  _resolveDCycleChoice(choice) {
+    document.getElementById('dcycleConfirmModal').classList.remove('open');
+    if (FORM._dcyclePromiseResolve) {
+      FORM._dcyclePromiseResolve(choice);
+      FORM._dcyclePromiseResolve = null;
+    }
+  },
+
+  // Shows the final ref-number confirmation dialog. `previewItems` is
+  // an array of { subName, refPreview, dCycle, forced }.
+  // Resolves true (proceed) or false (cancel).
+  _showRefConfirmModal(previewItems) {
+    return new Promise(resolve => {
+      FORM._refConfirmPromiseResolve = resolve;
+
+      const listEl = document.getElementById('refConfirmList');
+      listEl.innerHTML = previewItems.map(it => `
+        <div style="background:var(--surface-2);border:1px solid var(--border);
+          border-radius:var(--radius);padding:10px 14px">
+          <div style="font-size:12px;color:var(--ink-4);margin-bottom:2px">
+            ${UI.esc(it.subName)}
+            ${it.forced ? '<span style="color:var(--amber-dark);font-size:10px;margin-left:6px">⚡ FORCED NEW CYCLE</span>' : ''}
+          </div>
+          <div style="font-family:'DM Mono',monospace;font-size:13px;font-weight:600;color:var(--green)">
+            ${UI.esc(it.refPreview)}
+          </div>
+        </div>
+      `).join('');
+
+      document.getElementById('refConfirmModal').classList.add('open');
+    });
+  },
+
+  _refConfirmAccept() {
+    document.getElementById('refConfirmModal').classList.remove('open');
+    if (FORM._refConfirmPromiseResolve) {
+      FORM._refConfirmPromiseResolve(true);
+      FORM._refConfirmPromiseResolve = null;
+    }
+  },
+
+  _refConfirmReject() {
+    document.getElementById('refConfirmModal').classList.remove('open');
+    if (FORM._refConfirmPromiseResolve) {
+      FORM._refConfirmPromiseResolve(false);
+      FORM._refConfirmPromiseResolve = null;
+    }
+  },
+
+  // Builds a human-readable ref number PREVIEW (not yet claimed) so the
+  // user can see what they're about to commit to. Mirrors the format
+  // built by claim_ref_number() but uses live counter peeks — the
+  // ACTUAL number can differ by a digit if another submission races
+  // in between preview and claim (acceptable: this is a preview, the
+  // real number is always whatever claim_ref_number() atomically
+  // returns).
+  async _peekRefPreview(lot, subCode, houseNo, dCycle, letterDate) {
+    try {
+      const yyyymm = (letterDate || '').replace(/-/g, '').slice(0, 6);
+      const { data: counters } = await SB
+        .from('ref_counters')
+        .select('counter_key, counter_value')
+        .in('counter_key', [
+          'lot_sub_' + lot + '_' + subCode,
+          'lot_month_' + lot + '_' + yyyymm,
+          'lot_overall_' + lot,
+        ]);
+      const get = key => {
+        const row = (counters || []).find(c => c.counter_key === key);
+        return (row ? row.counter_value : 0) + 1; // +1 = next value that WILL be claimed
+      };
+      const subCount  = get('lot_sub_' + lot + '_' + subCode);
+      const monthCount= get('lot_month_' + lot + '_' + yyyymm);
+      const overall   = get('lot_overall_' + lot);
+      return 'HYK/EOD/' + lot + '/' + subCode + '-' + subCount +
+        '/' + houseNo + '-' + dCycle +
+        '/' + yyyymm + '-' + String(monthCount).padStart(3, '0') +
+        '/' + String(overall).padStart(4, '0');
+    } catch(e) {
+      return 'HYK/EOD/' + lot + '/' + subCode + '-?/' + houseNo + '-' + dCycle + '/?-?/????';
+    }
+  },
+
   // ── Submit ────────────────────────────────────────────────
   async onSubmitClick() {
     const err = FORM._validate();
@@ -5750,19 +5974,90 @@ const FORM = {
     }
     FORM._hideIncompleteWarning();
 
+    const s       = FORM._state;
+    const offline = STATE.netStatus === 'offline';
+
+    // ── STEP A: pre-check for an open D-cycle on this house ──────────
+    // Test mode and offline submissions skip the open-cycle dialog —
+    // test letters don't touch real progress rows, and offline
+    // submissions can't reliably query current state anyway (queued
+    // for reconciliation on reconnect instead).
+    let forcedNewCycle = false;
+
+    if (!FORM._state.isTest && !offline) {
+      const openRow = await DATA.getOpenCycleForHouse(s.lot, s.houseNo);
+      if (openRow) {
+        const choice = await FORM._askDCycleChoice(s.houseNo, openRow);
+        if (choice === 'cancel') {
+          toast('Submission cancelled', 'warn');
+          return;
+        }
+        forcedNewCycle = (choice === 'forceNew');
+      }
+    }
+
+    // ── STEP B: build a ref-number PREVIEW for every sub, and show
+    //            the final confirmation dialog before writing anything
+    if (!FORM._state.isTest && !offline) {
+      const previewItems = [];
+      // All subs in one submission share the SAME resolved d_cycle
+      // decision (join existing X, or force new X+1) — compute it once.
+      const dCycleInfo = await DATA.calcDCycle(
+        s.lot, s.houseNo, null, null, forcedNewCycle
+      );
+
+      for (const sub of s.subs) {
+        const refPreview = await FORM._peekRefPreview(
+          s.lot, sub.subShortCode, s.houseNo, dCycleInfo.dCycle, s.letterDate
+        );
+        previewItems.push({
+          subName: sub.subName,
+          refPreview,
+          dCycle: dCycleInfo.dCycle,
+          forced: forcedNewCycle,
+        });
+      }
+
+      const proceed = await FORM._showRefConfirmModal(previewItems);
+      if (!proceed) {
+        toast('Submission cancelled', 'warn');
+        return;
+      }
+
+      // Audit log the override decision immediately, before submission,
+      // so there is a record even if something fails partway through.
+      if (forcedNewCycle) {
+        LOG.audit(
+          STATE.user.username, 'UPDATE', 'progress', null,
+          'House ' + s.houseNo + ' Lot ' + s.lot,
+          { reason: 'open_cycle_existed' },
+          { reason: 'Manual override by user — forced new D-cycle ' + dCycleInfo.dCycle +
+                     ' despite open cycle ' + (dCycleInfo.openDCycle || 'unknown') + ' existing' }
+        );
+      }
+    }
+
     const btn = document.getElementById('sf_submitBtn');
     btn.disabled    = true;
     btn.textContent = 'Generating…';
 
-    const s       = FORM._state;
-    const offline = STATE.netStatus === 'offline';
     const results = [];
+    const generatedHistoryIds = []; // for auto-JPEG-download after success
 
     showLoading(offline
       ? 'Saving letters with temporary references…'
       : 'Generating reference numbers…');
 
     try {
+      // Resolve the shared D-cycle decision ONCE for the whole submission
+      // (all subs in this batch go into the same cycle together).
+      let sharedDCycleInfo = null;
+      if (!FORM._state.isTest && !offline) {
+        sharedDCycleInfo = await DATA.calcDCycle(
+          s.lot, s.houseNo, null, null, forcedNewCycle
+        );
+      }
+
       for (const sub of s.subs) {
         const defectItems = sub.defectItems.filter(d => d.description.trim());
 
@@ -5836,6 +6131,7 @@ const FORM = {
             ref_no: testRef, ref_status: 'confirmed', d_cycle: dCycleInfo.dCycle
           }).eq('id', histId);
           results.push({ sub: sub.subName, ref: testRef, pending: false, isTest: true, dCycle: dCycleInfo.dCycle });
+          generatedHistoryIds.push(histId);
 
         } else if (offline) {
           // OFFLINE — Queue for ref number claim on reconnect
@@ -5855,10 +6151,9 @@ const FORM = {
           }, { onConflict: 'lot,house_no,d_cycle', ignoreDuplicates: true });
 
         } else {
-          // Pre-calculate D cycle for this sub using business logic
-          const dCycleInfo = await DATA.calcDCycle(
-            s.lot, s.houseNo, sub.subId, sub.subShortCode
-          );
+          // Use the SHARED d-cycle decision for this whole submission —
+          // every sub in this batch joins/creates the SAME cycle.
+          const dCycleInfo = sharedDCycleInfo;
 
           // Claim real ref number via SQL function with d_cycle override
           const { data: refData, error: refErr } = await SB.rpc('claim_ref_number', {
@@ -5876,6 +6171,7 @@ const FORM = {
           if (refErr) throw new Error('Ref number failed for ' + sub.subName + ': ' + refErr.message);
 
           results.push({ sub: sub.subName, ref: refData.ref_no, pending: false, dCycle: refData.d_cycle });
+          generatedHistoryIds.push(histId);
 
           // Get or create progress row for this d_cycle
           let progressId = dCycleInfo.progressId; // may be set if joining existing row
@@ -5890,6 +6186,9 @@ const FORM = {
               .eq('d_cycle', refData.d_cycle)
               .single();
             progressId = progressData?.id || null;
+            // Cache it so subsequent subs in this same loop reuse it
+            // instead of re-querying (they all share the same cycle).
+            dCycleInfo.progressId = progressId;
           }
 
           if (progressId) {
@@ -5936,6 +6235,28 @@ const FORM = {
 
       // Show success
       FORM._showSuccessModal(results, s);
+
+      // ── AUTO-DOWNLOAD JPEGs ──────────────────────────────────────
+      // Fires immediately after the success modal appears, one JPEG
+      // per generated letter, no extra click required. Skipped for
+      // offline/pending-ref submissions since those don't have a
+      // final ref number yet (and skipped if browser blocks multiple
+      // auto-downloads — each call is independently try/caught so one
+      // failure doesn't stop the rest).
+      if (!offline && generatedHistoryIds.length) {
+        (async () => {
+          for (const histId of generatedHistoryIds) {
+            try {
+              await HIST.downloadJPEG(histId);
+              // Small stagger so the browser doesn't throttle/block
+              // rapid-fire downloads as a popup-like flood.
+              await new Promise(r => setTimeout(r, 350));
+            } catch(e) {
+              console.warn('[FORM] auto JPEG download failed for', histId, e.message);
+            }
+          }
+        })();
+      }
 
     } catch(e) {
       hideLoading();
