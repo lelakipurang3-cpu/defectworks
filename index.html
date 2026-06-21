@@ -473,6 +473,7 @@ input,textarea,select{font-family:'DM Sans',sans-serif}
   padding:8px 10px;background:var(--red-light);border-radius:var(--radius);
   border:1px solid #fca5a5}
 .modal-err.show{display:block}
+#restorePreview.show{display:block}
 .modal-footer{display:flex;gap:8px;justify-content:flex-end;margin-top:20px}
 
 /* ═══════════════════════════════════════════════════════════════
@@ -2084,11 +2085,13 @@ input,textarea,select{font-family:'DM Sans',sans-serif}
     <div class="card-body">
       <div class="hist-filters">
         <div class="field">
-          <label>Date From</label>
+          <label>Letter Date From
+            <span style="color:var(--ink-5);font-size:9px">(filters by letter date — not when you're viewing)</span>
+          </label>
           <input type="date" id="hist_dateFrom">
         </div>
         <div class="field">
-          <label>Date To</label>
+          <label>Letter Date To</label>
           <input type="date" id="hist_dateTo">
         </div>
         <div class="field">
@@ -2129,6 +2132,16 @@ input,textarea,select{font-family:'DM Sans',sans-serif}
           <button class="btn btn-primary" style="width:100%"
             onclick="HIST.search()">Search</button>
         </div>
+        <div class="field" style="align-self:end">
+          <button class="btn btn-secondary" style="width:100%"
+            onclick="HIST.clearFilters()">✕ Clear All</button>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--ink-4);margin-top:8px;line-height:1.5">
+        💡 The date range filters which <strong>letter dates</strong> are shown — it has nothing to do with
+        when you submitted or are viewing. Defaults to the last 30 days. New letters you just submitted
+        today will always show (today falls inside the default range) — if one is missing, check it
+        isn't filtered out by Project, Subcontractor, Status, or Keyword instead.
       </div>
     </div>
   </div>
@@ -2813,6 +2826,77 @@ input,textarea,select{font-family:'DM Sans',sans-serif}
       <div style="padding:20px;color:var(--ink-4);font-size:13px">Loading…</div>
     </div>
   </div>
+
+  <!-- ════════════════════════════════════════════════════════
+       DATA MANAGEMENT — Backup + Purge submission data
+       Added per user request: a way to (a) download a full
+       backup of all data, and (b) wipe ONLY submission/transaction
+       data (history, progress, ref counters/events, notifications,
+       logs) for a clean-slate restart, while leaving master data
+       (users, subcontractors, PICs, projects, system config, letter
+       templates) completely untouched.
+  ════════════════════════════════════════════════════════════ -->
+  <div class="card" style="margin-top:16px">
+    <div class="card-hdr">
+      <div>
+        <div class="card-title">⚠ Data Management</div>
+        <div class="card-sub">Backup and reset submission data — use with care</div>
+      </div>
+    </div>
+    <div class="card-body">
+
+      <!-- Backup -->
+      <div style="margin-bottom:24px">
+        <div style="font-weight:600;font-size:14px;color:var(--ink);margin-bottom:4px">
+          📦 Backup All Data
+        </div>
+        <div style="font-size:12px;color:var(--ink-4);margin-bottom:10px;line-height:1.6">
+          Downloads a single JSON file containing every table in the database —
+          letters, progress, users, subcontractors, PICs, projects, config,
+          templates, and logs. Safe to run any time, makes no changes.
+          <strong>Always run this before using Purge below.</strong>
+        </div>
+        <button class="btn btn-secondary" onclick="ADMIN.backupAllData()">
+          ⬇ Download Full Backup (JSON)
+        </button>
+        <button class="btn btn-secondary" onclick="ADMIN.openRestoreModal()" style="margin-left:8px">
+          ⬆ Restore From Backup
+        </button>
+        <div style="font-size:12px;color:var(--ink-4);margin-top:8px;line-height:1.6">
+          Restore only <strong>adds rows that are missing</strong> — it never deletes or
+          overwrites anything currently in the database. Safe to run on a live system.
+        </div>
+      </div>
+
+      <div style="border-top:1px solid var(--border);margin:20px 0"></div>
+
+      <!-- Purge -->
+      <div>
+        <div style="font-weight:600;font-size:14px;color:var(--red);margin-bottom:4px">
+          🗑 Purge Submission Data
+        </div>
+        <div style="font-size:12px;color:var(--ink-4);margin-bottom:10px;line-height:1.6">
+          Permanently deletes ALL letters, progress tracking, reference number
+          counters, analytics events, notifications, and submission/test logs —
+          a true clean slate for starting fresh. This does <strong>NOT</strong> touch:
+          users, passwords, subcontractors, PICs, projects, defect categories,
+          system config, or letter templates — those stay exactly as they are.
+        </div>
+        <div style="background:var(--red-light);border:1px solid #fca5a5;
+          border-radius:var(--radius);padding:12px 14px;margin-bottom:12px;
+          font-size:12px;color:var(--red);line-height:1.6">
+          ⚠ This cannot be undone. Download a backup first. Reference number
+          counters will reset, meaning the next letter for any lot/sub will
+          start over (e.g. ACP-1) — this WILL cause duplicate-looking reference
+          numbers if you don't intend a genuine fresh start.
+        </div>
+        <button class="btn btn-danger" onclick="ADMIN.openPurgeModal()">
+          🗑 Purge Submission Data…
+        </button>
+      </div>
+
+    </div>
+  </div>
 </div>
     <div class="admin-panel" id="apAuditlog">
   <div class="card">
@@ -2960,6 +3044,81 @@ input,textarea,select{font-family:'DM Sans',sans-serif}
       <button class="btn btn-primary" id="claimAllBtn"
         onclick="REF.claimAllPending()">
         Claim All →
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     PURGE SUBMISSION DATA — CONFIRMATION MODAL
+     Requires typing an exact confirmation phrase, not just a
+     click, given how destructive and irreversible this action is.
+════════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="purgeDataModal">
+  <div class="modal-box" style="max-width:480px">
+    <div class="modal-title" style="color:var(--red)">🗑 Purge Submission Data</div>
+    <div style="font-size:13px;color:var(--ink-3);margin-bottom:14px;line-height:1.7">
+      You are about to <strong>permanently delete</strong> every letter, progress row,
+      reference number counter, analytics event, notification, and submission log in
+      the database. Users, subcontractors, PICs, projects, defect categories, system
+      config, and letter templates will <strong>not</strong> be touched.
+    </div>
+    <div style="background:var(--red-light);border:1px solid #fca5a5;border-radius:var(--radius);
+      padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--red);line-height:1.6">
+      This cannot be undone, even by support. Make sure you have already downloaded
+      a backup using the button above.
+    </div>
+    <div class="modal-err" id="purgeDataErr"></div>
+    <div class="field">
+      <label>Type <code style="background:var(--surface-2);padding:1px 6px;border-radius:3px">PURGE</code> to confirm</label>
+      <input id="purgeConfirmText" placeholder="Type PURGE in capital letters" autocomplete="off">
+    </div>
+    <div class="field">
+      <label>Your Password <span class="req">*</span></label>
+      <input id="purgeConfirmPassword" type="password" placeholder="Re-enter your password" autocomplete="off">
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="document.getElementById('purgeDataModal').classList.remove('open')">
+        Cancel
+      </button>
+      <button class="btn btn-danger" onclick="ADMIN.confirmPurgeData()">
+        Permanently Delete Submission Data
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     RESTORE FROM BACKUP — MODAL
+     Upsert-only: shows a preview of what's in the chosen file
+     (export date, row counts per table) before the user confirms.
+     Never deletes or overwrites existing rows.
+════════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="restoreDataModal">
+  <div class="modal-box" style="max-width:480px">
+    <div class="modal-title">⬆ Restore From Backup</div>
+    <div style="font-size:13px;color:var(--ink-3);margin-bottom:14px;line-height:1.7">
+      Choose a backup JSON file downloaded from this app. Rows whose ID already
+      exists in the database are left untouched — only rows that are
+      <strong>missing</strong> will be added back. Nothing currently in the
+      database is deleted or overwritten.
+    </div>
+    <div class="modal-err" id="restoreDataErr"></div>
+    <div class="field">
+      <label>Backup file (.json)</label>
+      <input id="restoreFileInput" type="file" accept="application/json"
+        onchange="ADMIN.onRestoreFileSelected(this)">
+    </div>
+    <pre id="restorePreview" style="display:none;font-size:11px;line-height:1.6;
+      background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);
+      padding:10px 12px;margin-top:8px;white-space:pre-wrap;color:var(--ink-3);
+      max-height:220px;overflow-y:auto"></pre>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="document.getElementById('restoreDataModal').classList.remove('open')">
+        Cancel
+      </button>
+      <button class="btn btn-primary" id="restoreConfirmBtn" disabled onclick="ADMIN.confirmRestoreData()">
+        Restore Missing Rows
       </button>
     </div>
   </div>
@@ -3906,6 +4065,37 @@ const DATA = {
       .eq('id', id)
       .single();
     if (error) throw error;
+
+    // Project items (A) B) C)... lines) are fetched SEPARATELY here
+    // rather than via a nested `projects(project_items(...))` embed.
+    // The nested embed depends on PostgREST correctly auto-detecting
+    // the history.project_id → projects.id foreign key relationship,
+    // which was silently failing (no error thrown — it just returns
+    // r.projects as null/undefined), causing the A)/B)/C) project
+    // item lines to vanish from History preview, Print, and JPEG
+    // export while still showing correctly in the live Submission
+    // Preview (which reads from in-memory FORM._state.projectItems
+    // and never touched this join at all — that's why only one of
+    // the two code paths was broken).
+    //
+    // Looking up by `lot` instead is bullet-proof: every history row
+    // always has its own `lot` column populated directly (not via a
+    // join), so this never depends on FK embedding working.
+    if (data?.lot) {
+      try {
+        const { data: proj } = await SB
+          .from('projects')
+          .select('id, project_items(id,label,description,sort_order)')
+          .eq('lot', data.lot)
+          .limit(1)
+          .maybeSingle();
+        data.projects = proj || null;
+      } catch(e) {
+        console.warn('[DATA] project_items lookup failed:', e.message);
+        data.projects = null;
+      }
+    }
+
     return data;
   },
 
@@ -5790,6 +5980,26 @@ const FORM = {
   // ── Reset form ────────────────────────────────────────────
   resetForm() {
     if (!confirm('Clear the form? All entered data will be lost.')) return;
+    FORM._doReset();
+    toast('Form cleared', 'ok');
+  },
+
+  // Same field-clearing logic as resetForm(), but with NO confirm()
+  // dialog and NO toast — used right after a successful submission to
+  // silently put the Details tab back into a clean state in the
+  // background, while the success modal (showing the real ref number)
+  // is what the user actually sees in the foreground. By the time they
+  // dismiss that modal, Details is already reset underneath — no
+  // separate "are you sure" prompt, since there's nothing left to lose
+  // (the data was just successfully submitted).
+  _resetFormSilent() {
+    FORM._doReset();
+  },
+
+  // Shared reset logic. Never call this directly — go through
+  // resetForm() (manual, asks first) or _resetFormSilent() (automatic,
+  // post-submission) so the confirm-dialog behavior stays correct.
+  _doReset() {
     FORM._state.projectId    = null;
     FORM._state.lot          = null;
     FORM._state.projectTitle = '';
@@ -5843,7 +6053,6 @@ const FORM = {
     FORM.addSubBlock();
     FORM._switchSub('details');
     FORM._updateRefPill();
-    toast('Form cleared', 'ok');
   },
 
   // ── D-cycle / ref-confirm dialog resolvers ─────────────────
@@ -6310,7 +6519,7 @@ const FORM = {
             Real reference numbers will be assigned automatically when you reconnect.
           </div>` : ''}
         <div class="modal-footer">
-          <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove();FORM.resetForm();FORM._switchSub('details')">
+          <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">
             New Submission
           </button>
           <button class="btn btn-primary" onclick="this.closest('.modal-overlay').remove();UI.switchPanel('history')">
@@ -6320,6 +6529,18 @@ const FORM = {
       </div>
     `;
     document.body.appendChild(modal);
+
+    // ── AUTO-RESET, IN THE BACKGROUND ───────────────────────────
+    // The user is looking at this modal (the real confirmed ref
+    // number, in the foreground). Behind it, silently reset Details
+    // back to a clean blank form and switch to the Details tab — so
+    // whenever the modal is dismissed (either button, or just closing
+    // it), the next letter can be started immediately with no extra
+    // click and no "clear form?" prompt (there's nothing to lose, this
+    // data was just successfully submitted). Uses the silent variant
+    // of reset (_resetFormSilent), which skips the confirm() dialog
+    // and toast that the manual "Clear Form" button still uses.
+    FORM._resetFormSilent();
   },
 };
 
@@ -6419,6 +6640,20 @@ const HIST = {
     } catch(e) {
       console.warn('[HIST] init failed:', e.message);
     }
+  },
+
+  // ── Clear all filters back to default ────────────────────
+  clearFilters() {
+    const today = new Date().toISOString().slice(0, 10);
+    const d30   = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    document.getElementById('hist_dateFrom').value = d30;
+    document.getElementById('hist_dateTo').value    = today;
+    document.getElementById('hist_lot').value       = '';
+    document.getElementById('hist_sub').value       = '';
+    document.getElementById('hist_status').value    = '';
+    document.getElementById('hist_keyword').value   = '';
+    document.getElementById('hist_showTest').checked = false;
+    HIST.search(1);
   },
 
   // ── Search ────────────────────────────────────────────────
@@ -6650,12 +6885,16 @@ const HIST = {
 
   // ── Build letter HTML from a full history record ──────────
   _buildLetterHTML(r) {
-    const projItems = (r.project_items || r.history_defects?.filter(() => false) || []);
-
-    // project_items comes from the project join — not history
-    // We store project_title, location, client as snapshots
-    // For preview, reconstruct project items from project if available
-    const projLines = ''; // project items not stored per-letter; show title/loc/client only
+    // r.projects.project_items comes from the join added in
+    // DATA.getHistoryRecord() — r.projects is a single related row
+    // (project_id foreign key), and .project_items is its nested array.
+    const projItemsRaw = r.projects?.project_items || [];
+    const projItems = [...projItemsRaw].sort((a, b) =>
+      (a.sort_order ?? 0) - (b.sort_order ?? 0)
+    );
+    const projLines = projItems
+      .map(it => `<p>${UI.esc(it.label)}) ${UI.esc(it.description)}</p>`)
+      .join('');
 
     const terms = (r.terms_text || '').split('\n').filter(t => t.trim())
       .map(t => `<li>${UI.esc(t)
@@ -6760,7 +6999,13 @@ const HIST = {
   // JPEG output always matches the on-screen preview exactly,
   // including bold, underline, alignment, and spacing.
   _buildLetterHTMLInline(r) {
-    const projLines = '';
+    const projItemsRaw = r.projects?.project_items || [];
+    const projItemsSorted = [...projItemsRaw].sort((a, b) =>
+      (a.sort_order ?? 0) - (b.sort_order ?? 0)
+    );
+    const projLines = projItemsSorted
+      .map(it => `<p style="margin:0 0 1pt;font-size:10pt">${UI.esc(it.label)}) ${UI.esc(it.description)}</p>`)
+      .join('');
 
     const terms = (r.terms_text || '').split('\n').filter(t => t.trim())
       .map(t => `<li style="margin-bottom:1pt;text-align:justify">${UI.esc(t)
@@ -7027,6 +7272,13 @@ const HIST = {
 
   // ── Edit modal ────────────────────────────────────────────
   async openEditModal(id) {
+    // Safety reset: clears any stale re-entrancy guard left over from a
+    // previous save attempt that may have been interrupted (e.g. hard
+    // page navigation mid-save) without going through saveEdit()'s own
+    // `finally` block. Without this, a rare interrupted session could
+    // otherwise lock out editing permanently until a full reload.
+    HIST._savingEdit = false;
+
     const errEl = document.getElementById('editHistErr');
     errEl.classList.remove('show');
 
@@ -7082,7 +7334,7 @@ const HIST = {
     try {
       const { data } = await SB
         .from('history')
-        .select('id,ref_no,temp_ref,ref_status,version,submitted_by,submitted_at,void_reason')
+        .select('id,ref_no,temp_ref,ref_status,version,current_version,submitted_by,submitted_at,void_reason')
         .or(`id.eq.${rootId},parent_id.eq.${rootId}`)
         .order('version', { ascending: false });
 
@@ -7100,7 +7352,7 @@ const HIST = {
             <span style="font-size:13px;color:var(--ink)">
               ${UI.esc(v.ref_no || v.temp_ref || '—')}
             </span>
-            ${v.current_version !== false
+            ${v.current_version === true
               ? '<span class="badge badge-ok" style="margin-left:4px">Current</span>'
               : ''}
           </div>
@@ -7116,6 +7368,20 @@ const HIST = {
   },
 
   async saveEdit() {
+    // Re-entrancy guard: prevents a double-click (or a slow connection plus
+    // an impatient second click) from firing saveEdit() twice concurrently.
+    // Without this, two overlapping calls could both pass the "insert new
+    // version" step before either reached "demote old version", leaving
+    // TWO rows with current_version=true sharing the same ref_no — exactly
+    // the data state that produces "duplicate key value violates unique
+    // constraint history_ref_no_current_unique". The button is also
+    // disabled below for the same reason, as a visible/UX-level backstop.
+    if (HIST._savingEdit) return;
+    HIST._savingEdit = true;
+
+    const saveBtn = document.querySelector('#editHistModal .btn-primary');
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+
     const errEl   = document.getElementById('editHistErr');
     const histId  = document.getElementById('edit_histId').value;
     const parentId= document.getElementById('edit_parentId').value;
@@ -7125,14 +7391,21 @@ const HIST = {
 
     errEl.classList.remove('show');
 
+    const releaseGuard = () => {
+      HIST._savingEdit = false;
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save New Version →'; }
+    };
+
     if (!remarks) {
       errEl.textContent = 'Edit remarks are required — explain what changed';
       errEl.classList.add('show');
+      releaseGuard();
       return;
     }
     if (!letterDate || !houseNo) {
       errEl.textContent = 'Letter date and house number are required';
       errEl.classList.add('show');
+      releaseGuard();
       return;
     }
 
@@ -7140,21 +7413,19 @@ const HIST = {
     if (!defects.length) {
       errEl.textContent = 'At least one defect item is required';
       errEl.classList.add('show');
+      releaseGuard();
       return;
     }
 
     try {
       showLoading('Saving new version…');
 
-      // Fetch original record for snapshot
+      // Fetch original record for snapshot (select('*') pulls every
+      // column including ref_no, id, created_at, voided_at, etc. —
+      // we must NOT blindly spread these into the new row below)
       const original = await DATA.getHistoryRecord(histId);
 
-      // Mark current version as not current
-      await SB.from('history')
-        .update({ current_version: false })
-        .or(`id.eq.${histId},parent_id.eq.${parentId}`);
-
-      // Get next version number
+      // Get next version number BEFORE writing anything
       const { data: vData } = await SB
         .from('history')
         .select('version')
@@ -7163,43 +7434,110 @@ const HIST = {
         .limit(1);
       const nextVersion = (vData?.[0]?.version || 1) + 1;
 
-      // Insert new version
+      // ── Build the new version row using an EXPLICIT field allowlist.
+      // This is the actual fix: the old code did `...original` which
+      // copied ref_no (UNIQUE constraint → insert fails), id, temp_ref,
+      // voided_at/voided_by/void_reason, and created_at verbatim from
+      // the row being edited. A duplicate ref_no insert always failed,
+      // but by then the OLD version had already been marked
+      // current_version=false (see below) with no way back — that is
+      // exactly the "v1 disappears, v2 never appears" bug.
+      //
+      // New versions intentionally do NOT carry a ref_no / temp_ref.
+      // The letter keeps using the SAME reference number across all
+      // its versions (that's the whole point of versioning — it's
+      // still the same legal letter, just corrected) — so ref_no is
+      // looked up from the CURRENT version and reused, never copied
+      // blind, and never regenerated via claim_ref_number().
       const newRow = {
-        ...original,
-        id:              undefined,  // new UUID
+        ref_no:          original.ref_no,        // same ref number, reused on purpose
+        ref_status:      original.ref_status === 'void' ? 'confirmed' : original.ref_status,
+        temp_ref:        null,                    // versions never carry a stale temp ref
+        letter_date:     letterDate,
+        lot:             original.lot,
+        project_id:      original.project_id,
+        project_title:   original.project_title,
+        location:        original.location,
+        client:          original.client,
+        house_no:        houseNo,
+        d_cycle:         original.d_cycle,
+        sub_id:          original.sub_id,
+        subcontractor:   original.subcontractor,
+        sub_short_code:  original.sub_short_code,
+        body_text:       original.body_text,
+        terms_text:      original.terms_text,
+        closing_text:    original.closing_text,
+        date_from_buyer: original.date_from_buyer,
+        date_to_subcon:  original.date_to_subcon,
+        issuer_id:           original.issuer_id,
+        issuer_name:         original.issuer_name,
+        issuer_company:      original.issuer_company,
+        issuer_sig_url:      original.issuer_sig_url,
+        issuer_sig_type:     original.issuer_sig_type,
+        issuer_typed_name:   original.issuer_typed_name,
+        issuer_typed_font:   original.issuer_typed_font,
+        issuer_typed_color:  original.issuer_typed_color,
+        verifier_id:          original.verifier_id,
+        verifier_name:        original.verifier_name,
+        verifier_company:     original.verifier_company,
+        verifier_sig_url:     original.verifier_sig_url,
+        verifier_sig_type:    original.verifier_sig_type,
+        verifier_typed_name:  original.verifier_typed_name,
+        verifier_typed_font:  original.verifier_typed_font,
+        verifier_typed_color: original.verifier_typed_color,
+        jpeg_drive_url:  null,   // new version needs its own JPEG, don't inherit old link
+        is_test:         original.is_test || false,
         parent_id:       parentId,
         version:         nextVersion,
         current_version: true,
-        letter_date:     letterDate,
-        house_no:        houseNo,
         submitted_by:    STATE.user.username,
         submitted_at:    new Date().toISOString(),
         updated_at:      new Date().toISOString(),
-        // clear defects (re-inserted below)
-        history_defects: undefined,
+        // voided_at / voided_by / void_reason intentionally omitted —
+        // a new version is never born already-voided, even if the
+        // version it was edited from had been voided.
       };
 
-      const { data: newHist, error: newErr } = await SB
-        .from('history')
-        .insert(newRow)
-        .select('id')
-        .single();
-      if (newErr) throw newErr;
-
-      // Insert new defect items
-      await SB.from('history_defects').insert(
-        defects.map((d, i) => ({
-          history_id:  newHist.id,
+      // ── STEP 1–3 happen ATOMICALLY in a single Postgres transaction,
+      // via the edit_letter_version() RPC function (see
+      // HYK_DefectWorks_v8_EditLetterVersion_SQL.sql).
+      //
+      // Why not three separate Supabase calls (the previous approach)?
+      // Each .insert()/.update() call is its own transaction. The old
+      // version of this code inserted the new row FIRST (current_version
+      // = true) while the OLD row was still current_version = true —
+      // that immediately collides with the partial unique index
+      // (history_ref_no_current_unique), which allows only ONE
+      // current_version=true row per ref_no at any instant. The insert
+      // failed every time, before the demote step ever ran.
+      //
+      // Doing demote → insert → insert-defects inside ONE Postgres
+      // function fixes this correctly: the old row is demoted first
+      // (freeing the ref_no slot), then the new row takes it. If
+      // ANYTHING fails partway — bad data, defect insert error, an
+      // unexpected constraint — Postgres rolls back the WHOLE
+      // transaction automatically, so the old version ends up exactly
+      // as it was (current_version = true, fully intact). The letter
+      // is never left without a current version, which was the actual
+      // goal of the old step ordering — just achieved safely now.
+      const { data: newId, error: rpcErr } = await SB.rpc('edit_letter_version', {
+        p_hist_id:   histId,
+        p_parent_id: parentId,
+        p_new_row:   newRow,
+        p_defects:   defects.map((d, i) => ({
           item_no:     i + 1,
           description: d.description,
           remarks:     d.remarks || null,
-        }))
-      );
+        })),
+      });
+      if (rpcErr) throw new Error('Could not create new version: ' + rpcErr.message);
+
+      const newHist = { id: newId };
 
       // Audit log
       LOG.audit(
         STATE.user.username, 'UPDATE', 'history',
-        histId, original.ref_no || original.temp_ref,
+        newHist.id, original.ref_no || original.temp_ref,
         { version: original.version, house_no: original.house_no, letter_date: original.letter_date },
         { version: nextVersion, house_no: houseNo, letter_date: letterDate, remarks }
       );
@@ -7215,6 +7553,14 @@ const HIST = {
       hideLoading();
       errEl.textContent = e.message || 'Failed to save edit';
       errEl.classList.add('show');
+    } finally {
+      // Always release the re-entrancy guard and re-enable the button,
+      // whether saveEdit succeeded, failed validation, or threw partway
+      // through the write sequence. Without this in a `finally`, a
+      // thrown error would leave HIST._savingEdit stuck `true` forever,
+      // permanently locking the user out of editing ANY letter until a
+      // full page reload.
+      releaseGuard();
     }
   },
 
@@ -7295,7 +7641,9 @@ const HIST = {
       ].map(v => `"${String(v||'').replace(/"/g,'""')}"`).join(','));
 
       const csv  = [headers.join(','), ...rows].join('\n');
-      const blob = new Blob([csv], { type: 'text/csv' });
+      // UTF-8 BOM prefix prevents Excel from mangling non-ASCII
+      // characters (e.g. en-dash '–') into garbled 'â€“' sequences.
+      const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
       const url  = URL.createObjectURL(blob);
       const a    = document.createElement('a');
       a.href     = url;
@@ -7391,15 +7739,27 @@ REF.claimAllPending = async function(silent = false) {
 };
 
 /* ═══════════════════════════════════════════════════════════════
-   HISTORY PANEL INIT ON FIRST VISIT
+   HISTORY PANEL INIT ON FIRST VISIT — AND REFRESH ON EVERY VISIT
 ═══════════════════════════════════════════════════════════════ */
-// Extend switchPanel to init history
+// Extend switchPanel to init history once, but re-search EVERY time
+// the History panel is opened. Previously this only ran once per
+// session (HIST._initialized gate), so a letter submitted after the
+// first visit to History never appeared until a manual Search click
+// or full page reload — this is the "doesn't auto-update" bug.
 const _origSwitchPanel5 = UI.switchPanel.bind(UI);
 UI.switchPanel = function(name) {
   _origSwitchPanel5(name);
-  if (name === 'history' && !HIST._initialized) {
-    HIST._initialized = true;
-    HIST.init().then(() => HIST.search(1));
+  if (name === 'history') {
+    if (!HIST._initialized) {
+      HIST._initialized = true;
+      HIST.init().then(() => HIST.search(1));
+    } else {
+      // Already initialized in a previous visit this session — just
+      // refresh the results so anything submitted since last viewing
+      // History (e.g. a letter just generated from New Letter) shows
+      // up immediately without the user needing to click Search.
+      HIST.search(HIST._page || 1);
+    }
   }
 };
 </script>
@@ -7503,6 +7863,17 @@ const PROG = {
           )
         );
       }
+
+      // Assign a stable "submission order" number based on created_at
+      // ascending (oldest = No. 1), BEFORE any column-sort is applied
+      // by _renderTable(). This number stays fixed regardless of which
+      // column header the user clicks to sort by — it always reflects
+      // chronological submission order among the currently filtered
+      // rows, which is what "No." is for (item 3/4 from user request).
+      const byCreated = [...rows].sort((a, b) =>
+        new Date(a.created_at || 0) - new Date(b.created_at || 0)
+      );
+      byCreated.forEach((r, i) => { r._submitNo = i + 1; });
 
       PROG._data = rows;
       PROG._selected.clear();
@@ -7617,6 +7988,7 @@ const PROG = {
           <input type="checkbox" id="prog_thSelectAll"
             onchange="PROG.toggleSelectAll(this.checked)">
         </th>
+        <th class="no-sort" style="width:38px;text-align:center" title="Submission order, oldest first">No.</th>
         ${PROG._th('House', 'house_no')}
         ${PROG._th('Cycle', 'd_cycle')}
         ${PROG._th('Lot', 'lot')}
@@ -7681,6 +8053,8 @@ const PROG = {
               data-progress-id="${row.id}"
               onchange="PROG.onRowSelect(this)">
           </td>
+          <td style="text-align:center;font-family:'DM Mono',monospace;
+            font-size:11px;color:var(--ink-4)">${row._submitNo || ''}</td>
           <td>
             <strong style="font-size:13px">${UI.esc(row.house_no)}</strong>
             ${cycleCount > 1
@@ -8118,7 +8492,7 @@ const PROG = {
       )].sort();
 
       const header = [
-        'House No', 'D Cycle', 'Lot',
+        'No.', 'House No', 'D Cycle', 'Lot',
         'Date → Subcon', 'House Due', 'Completed', 'Buyer Sign', 'Buyer Sign Date',
         ...subCodes,
         'Is Complete',
@@ -8130,7 +8504,7 @@ const PROG = {
           return ps ? ps.status : '–';
         });
         return [
-          row.house_no, row.d_cycle, row.lot,
+          row._submitNo || '', row.house_no, row.d_cycle, row.lot,
           row.date_to_subcon, row.house_due_date, row.date_completed,
           row.buyer_sign_name || '', row.buyer_sign_date || '',
           ...subStatuses,
@@ -8164,7 +8538,7 @@ const PROG = {
       )].sort();
 
       const header = [
-        'House No', 'D Cycle', 'Lot', 'Date To Subcon', 'House Due Date',
+        'No.', 'House No', 'D Cycle', 'Lot', 'Date To Subcon', 'House Due Date',
         'Date Completed', 'Is Complete', 'Buyer Sign', 'Buyer Sign Date',
         ...subCodes
       ];
@@ -8175,7 +8549,7 @@ const PROG = {
           return ps ? ps.status : '–';
         });
         return [
-          row.house_no, row.d_cycle, row.lot,
+          row._submitNo || '', row.house_no, row.d_cycle, row.lot,
           row.date_to_subcon, row.house_due_date, row.date_completed,
           row.is_complete ? 'Yes' : 'No',
           row.buyer_sign_name || '', row.buyer_sign_date || '',
@@ -8184,7 +8558,12 @@ const PROG = {
       });
 
       const csv  = [header.join(','), ...csvRows].join('\n');
-      const blob = new Blob([csv], { type: 'text/csv' });
+      // Prepend a UTF-8 byte-order-mark (BOM). Without it, Excel on
+      // Windows assumes the file is Windows-1252 and mangles any
+      // non-ASCII character — this is exactly why the "–" en-dash
+      // used as a placeholder for "no status yet" was showing up as
+      // the garbled "â€“" sequence in the user's exported CSV.
+      const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
       const url  = URL.createObjectURL(blob);
       const a    = document.createElement('a');
       a.href     = url;
@@ -9862,7 +10241,9 @@ const ANALYTICS = {
     ].map(v => `"${String(v ?? '').replace(/"/g,'""')}"`).join(','));
 
     const csv  = [headers.join(','), ...rows].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
+    // UTF-8 BOM prefix prevents Excel from mangling non-ASCII
+    // characters (e.g. en-dash '–') into garbled 'â€“' sequences.
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
     a.href     = url;
@@ -10662,7 +11043,9 @@ const ADMIN = {
       ].map(v => `"${String(v).replace(/"/g,'""')}"`).join(','));
 
       const csv  = [headers.join(','), ...rows].join('\n');
-      const blob = new Blob([csv], { type: 'text/csv' });
+      // UTF-8 BOM prefix prevents Excel from mangling non-ASCII
+      // characters (e.g. en-dash '–') into garbled 'â€“' sequences.
+      const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
       const a    = document.createElement('a');
       a.href     = URL.createObjectURL(blob);
       a.download = `HYK_Audit_${new Date().toISOString().slice(0,10)}.csv`;
@@ -10744,7 +11127,9 @@ const ADMIN = {
       ].map(v => `"${String(v||'').replace(/"/g,'""')}"`).join(','));
 
       const csv  = [headers.join(','), ...rows].join('\n');
-      const blob = new Blob([csv], { type: 'text/csv' });
+      // UTF-8 BOM prefix prevents Excel from mangling non-ASCII
+      // characters (e.g. en-dash '–') into garbled 'â€“' sequences.
+      const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
       const a    = document.createElement('a');
       a.href     = URL.createObjectURL(blob);
       a.download = `HYK_Activity_${new Date().toISOString().slice(0,10)}.csv`;
@@ -10754,6 +11139,381 @@ const ADMIN = {
     } catch(e) {
       hideLoading();
       toast('Export failed: ' + e.message, 'err');
+    }
+  },
+
+  // ══════════════════════════════════════════════════════════
+  // DATA MANAGEMENT — Backup + Purge
+  // ══════════════════════════════════════════════════════════
+
+  // Every table in the database — used by backupAllData to fetch
+  // everything, and by confirmPurgeData to know what NOT to touch
+  // (the master-data tables are deliberately excluded from purge).
+  _ALL_TABLES: [
+    'users', 'projects', 'project_items', 'subcontractors', 'pics',
+    'history', 'history_defects', 'progress', 'progress_subs',
+    'ref_counters', 'ref_events', 'house_registry', 'notifications',
+    'audit_log', 'activity_log', 'submission_log', 'letter_templates',
+    'system_config', 'keepalive',
+  ],
+
+  // Tables that count as "submission / transaction data" — these are
+  // the ONLY tables touched by Purge. Everything else (users, master
+  // data, config, templates, audit_log) is explicitly preserved.
+  //
+  // ORDER MATTERS: child tables (those with a foreign key pointing at
+  // a parent table here) must be deleted BEFORE their parent, or
+  // Postgres rejects the parent delete with a foreign-key violation.
+  // Bug found 2026: ref_events.history_id → history.id was listed
+  // AFTER 'history' in this array, so every purge silently failed to
+  // delete history rows (the per-table try/catch swallowed the FK
+  // error and moved on — surfaced only as "Purge partially completed"
+  // in the toast, easy to miss). ref_events now correctly precedes
+  // history, matching the same pattern already used for
+  // history_defects/progress_subs preceding their parents.
+  _PURGE_TABLES: [
+    'history_defects',   // child of history — delete first (FK)
+    'progress_subs',     // child of progress — delete first (FK)
+    'ref_events',         // child of history — delete first (FK)
+    'history',
+    'progress',
+    'ref_counters',
+    'house_registry',
+    'notifications',
+    'submission_log',
+    'activity_log',      // operational log, not the permanent audit_log
+  ],
+
+  // ── Backup ────────────────────────────────────────────────
+  async backupAllData() {
+    showLoading('Building backup… this may take a moment');
+    try {
+      const backup = {
+        exported_at:    new Date().toISOString(),
+        exported_by:    STATE.user.username,
+        app_version:    CFG.APP_VERSION,
+        tables:         {},
+      };
+
+      for (const table of ADMIN._ALL_TABLES) {
+        const { data, error } = await SB.from(table).select('*');
+        if (error) {
+          console.warn('[ADMIN] backup skip table', table, error.message);
+          backup.tables[table] = { _error: error.message };
+        } else {
+          backup.tables[table] = data;
+        }
+      }
+
+      const json = JSON.stringify(backup, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const a    = document.createElement('a');
+      a.href     = URL.createObjectURL(blob);
+      a.download = `HYK_DefectWorks_Backup_${new Date().toISOString().slice(0,10)}_${Date.now()}.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+
+      hideLoading();
+      LOG.activity('export_backup', 'Full database backup downloaded', '');
+      LOG.audit(STATE.user.username, 'CREATE', 'system', null, 'Full backup downloaded');
+      toast('Backup downloaded ✓ — keep this file safe', 'ok');
+
+    } catch(e) {
+      hideLoading();
+      toast('Backup failed: ' + e.message, 'err');
+    }
+  },
+
+  // ── Restore ───────────────────────────────────────────────
+  // Upsert-only: inserts rows from the backup file that don't already
+  // exist (matched by id), and leaves every existing row untouched.
+  // This does NOT wipe current data first — by design (confirmed
+  // requirement) — so it's safe to run on a live database to recover
+  // specific deleted rows (e.g. after a purge that partially failed,
+  // or to pull back one accidentally-removed letter) without risking
+  // anything created since the backup was taken.
+  //
+  // Order is PARENT tables first, then children — the exact reverse
+  // of _PURGE_TABLES — because inserting a child row (e.g.
+  // history_defects) before its parent (history) exists would fail
+  // the same foreign-key check that caused the purge bug this was
+  // built alongside. Tables not in this list (e.g. keepalive,
+  // audit_log) are intentionally skipped on restore, same as they're
+  // intentionally skipped on purge.
+  _RESTORE_TABLES: [
+    'projects',
+    'project_items',
+    'subcontractors',
+    'pics',
+    'users',
+    'history',
+    'history_defects',
+    'progress',
+    'progress_subs',
+    'ref_counters',
+    'ref_events',
+    'house_registry',
+    'notifications',
+    'submission_log',
+    'activity_log',
+    'letter_templates',
+    'system_config',
+  ],
+
+  openRestoreModal() {
+    document.getElementById('restoreFileInput').value = '';
+    document.getElementById('restorePreview').textContent = '';
+    document.getElementById('restorePreview').classList.remove('show');
+    document.getElementById('restoreDataErr').classList.remove('show');
+    document.getElementById('restoreConfirmBtn').disabled = true;
+    ADMIN._restorePayload = null;
+    document.getElementById('restoreDataModal').classList.add('open');
+  },
+
+  // Reads and validates the selected file as soon as it's chosen, so
+  // the user sees what they're about to restore (export date, who
+  // made it, row counts per table) before confirming — rather than
+  // discovering a bad file only after clicking Restore.
+  onRestoreFileSelected(input) {
+    const errEl  = document.getElementById('restoreDataErr');
+    const preview = document.getElementById('restorePreview');
+    const btn    = document.getElementById('restoreConfirmBtn');
+    errEl.classList.remove('show');
+    preview.classList.remove('show');
+    btn.disabled = true;
+    ADMIN._restorePayload = null;
+
+    const file = input.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      let parsed;
+      try {
+        parsed = JSON.parse(reader.result);
+      } catch(e) {
+        errEl.textContent = 'This file is not valid JSON.';
+        errEl.classList.add('show');
+        return;
+      }
+      if (!parsed || typeof parsed !== 'object' || !parsed.tables) {
+        errEl.textContent = 'This does not look like a HYK DefectWorks backup file (missing "tables").';
+        errEl.classList.add('show');
+        return;
+      }
+
+      const counts = ADMIN._RESTORE_TABLES
+        .map(t => {
+          const rows = parsed.tables[t];
+          if (!Array.isArray(rows)) return `${t}: not present in file`;
+          return `${t}: ${rows.length} row(s)`;
+        })
+        .join('\n');
+
+      preview.textContent =
+        `Exported: ${parsed.exported_at || 'unknown'}\n` +
+        `Exported by: ${parsed.exported_by || 'unknown'}\n` +
+        `App version: ${parsed.app_version || 'unknown'}\n\n` +
+        counts;
+      preview.classList.add('show');
+
+      ADMIN._restorePayload = parsed;
+      btn.disabled = false;
+    };
+    reader.onerror = () => {
+      errEl.textContent = 'Could not read the selected file.';
+      errEl.classList.add('show');
+    };
+    reader.readAsText(file);
+  },
+
+  async confirmRestoreData() {
+    const errEl = document.getElementById('restoreDataErr');
+    errEl.classList.remove('show');
+
+    if (!ADMIN._restorePayload) {
+      errEl.textContent = 'Choose a valid backup file first.';
+      errEl.classList.add('show');
+      return;
+    }
+
+    document.getElementById('restoreDataModal').classList.remove('open');
+    showLoading('Restoring from backup…');
+
+    const results = { ok: [], skipped: [], failed: [] };
+    const tables = ADMIN._restorePayload.tables;
+
+    try {
+      for (const table of ADMIN._RESTORE_TABLES) {
+        const rows = tables[table];
+        if (!Array.isArray(rows) || rows.length === 0) {
+          results.skipped.push(table);
+          continue;
+        }
+        try {
+          // ignoreDuplicates: true is the upsert-only behavior —
+          // any row whose id already exists in the live table is
+          // left exactly as-is; only rows with a NEW id are
+          // inserted. Existing data is never overwritten.
+          const { error } = await SB
+            .from(table)
+            .upsert(rows, { onConflict: 'id', ignoreDuplicates: true });
+          if (error) throw error;
+          results.ok.push(`${table} (${rows.length})`);
+        } catch(e) {
+          console.error('[ADMIN] restore failed for', table, e.message);
+          results.failed.push(table + ': ' + e.message);
+        }
+      }
+
+      hideLoading();
+
+      LOG.audit(
+        STATE.user.username, 'CREATE', 'system', null,
+        'RESTORE: backup file applied (upsert-only, no rows overwritten)',
+        null,
+        { tables_succeeded: results.ok, tables_skipped: results.skipped, tables_failed: results.failed }
+      );
+      await LOG.flush();
+
+      if (results.failed.length) {
+        toast(`Restore partially completed. Failed: ${results.failed.join('; ')}`, 'warn');
+      } else {
+        toast('Restore complete — only missing rows were added ✓', 'ok');
+      }
+
+      // Clear caches so any restored master data (projects, subs,
+      // PICs, config) shows up immediately without a manual reload.
+      DATA._setCache('projects', null);
+      DATA._setCache('subcontractors', null);
+      DATA._setCache('pics', null);
+      DATA._setCache('systemConfig', null);
+      STATE.cache.houseRegistry = {};
+
+      setTimeout(() => location.reload(), 1500);
+
+    } catch(e) {
+      hideLoading();
+      toast('Restore failed: ' + e.message, 'err');
+    }
+  },
+
+
+  openPurgeModal() {
+    document.getElementById('purgeConfirmText').value     = '';
+    document.getElementById('purgeConfirmPassword').value = '';
+    document.getElementById('purgeDataErr').classList.remove('show');
+    document.getElementById('purgeDataModal').classList.add('open');
+  },
+
+  async confirmPurgeData() {
+    const errEl    = document.getElementById('purgeDataErr');
+    const typed    = document.getElementById('purgeConfirmText').value.trim();
+    const password = document.getElementById('purgeConfirmPassword').value;
+    errEl.classList.remove('show');
+
+    if (typed !== 'PURGE') {
+      errEl.textContent = 'You must type PURGE exactly (capital letters) to confirm';
+      errEl.classList.add('show');
+      return;
+    }
+    if (!password) {
+      errEl.textContent = 'Password is required to confirm this action';
+      errEl.classList.add('show');
+      return;
+    }
+
+    // Re-verify the current admin's own password before allowing the
+    // purge to proceed — this is a deliberately destructive action and
+    // should not be triggerable by, say, an unattended logged-in
+    // session or a stray click sequence.
+    try {
+      const { data: users } = await SB
+        .from('users')
+        .select('password_hash')
+        .eq('id', STATE.user.id)
+        .limit(1);
+      const match = users?.[0] && await bcrypt.compare(password, users[0].password_hash);
+      if (!match) {
+        errEl.textContent = 'Password is incorrect';
+        errEl.classList.add('show');
+        return;
+      }
+    } catch(e) {
+      errEl.textContent = 'Could not verify password: ' + e.message;
+      errEl.classList.add('show');
+      return;
+    }
+
+    document.getElementById('purgeDataModal').classList.remove('open');
+    showLoading('Purging submission data…');
+
+    const results = { ok: [], failed: [] };
+
+    try {
+      // Delete in the order defined by _PURGE_TABLES, which is already
+      // ordered child-tables-first (history_defects, progress_subs)
+      // so foreign key constraints from history/progress are satisfied
+      // before the parent rows are removed.
+      for (const table of ADMIN._PURGE_TABLES) {
+        try {
+          // Supabase requires a filter on delete — this matches every
+          // row by using a condition that's always true for any UUID
+          // primary key, since there is no built-in "delete all" verb.
+          const { error } = await SB.from(table)
+            .delete()
+            .not('id', 'is', null);
+          if (error) throw error;
+          results.ok.push(table);
+        } catch(e) {
+          console.error('[ADMIN] purge failed for', table, e.message);
+          results.failed.push(table + ': ' + e.message);
+        }
+      }
+
+      // Reset all ref number counters back to zero by deleting every
+      // row in ref_counters (already included above) — counters are
+      // recreated fresh via upsert the next time claim_ref_number()
+      // runs, starting again from 1.
+
+      hideLoading();
+
+      // This action itself must be recorded in the permanent,
+      // never-purged audit_log — written AFTER the purge completes,
+      // since activity_log (which IS purged) is not a safe place to
+      // record this.
+      LOG.audit(
+        STATE.user.username, 'DELETE', 'system', null,
+        'PURGE: submission data wiped',
+        { tables_attempted: ADMIN._PURGE_TABLES },
+        { tables_succeeded: results.ok, tables_failed: results.failed }
+      );
+      await LOG.flush(); // force immediate write, don't wait for batch timer
+
+      if (results.failed.length) {
+        toast(
+          `Purge partially completed. Failed: ${results.failed.join('; ')}`,
+          'warn'
+        );
+      } else {
+        toast('Submission data purged — clean slate ✓', 'ok');
+      }
+
+      // Invalidate all caches and force a clean reload of the app
+      // state so no stale in-memory data lingers after the purge.
+      DATA._setCache('projects', null);
+      DATA._setCache('subcontractors', null);
+      DATA._setCache('pics', null);
+      DATA._setCache('systemConfig', null);
+      STATE.cache.houseRegistry = {};
+      STATE.pendingRefs = [];
+      localStorage.removeItem('hyk_pending_refs');
+
+      setTimeout(() => location.reload(), 1500);
+
+    } catch(e) {
+      hideLoading();
+      toast('Purge failed: ' + e.message, 'err');
     }
   },
 };
